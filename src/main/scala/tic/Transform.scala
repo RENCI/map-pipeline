@@ -4,11 +4,17 @@ import scopt._
 import tic.Utils._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql._
+import java.util.Properties
 
 case class Config(
   mappingInputFile:String = "",
   dataInputFile:String="",
-  outputDir:String=""
+  outputDir:String="",
+  jdbcUrl:Option[String]=None,
+  jdbcUser:Option[String]=None,
+  jdbcPassword:Option[String]=None,
+  driverClass:Option[String]=None
 )
 
 object Transform {
@@ -18,7 +24,13 @@ object Transform {
     opt[String]("mapping_input_file").required().action((x, c) => c.copy(mappingInputFile = x))
     opt[String]("data_input_file").required().action((x, c) => c.copy(dataInputFile = x))
     opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x))
+    opt[String]("jdbc_url").action((x, c) => c.copy(jdbcUrl = Some(x)))
+    opt[String]("jdbc_user").action((x, c) => c.copy(jdbcUser = Some(x)))
+    opt[String]("jdbc_password").action((x, c) => c.copy(jdbcPassword = Some(x)))
+    opt[String]("driver_class").action((x, c) => c.copy(driverClass = Some(x)))
   }
+
+
 
   def main(args : Array[String]) {
     parser.parse(args, Config()) match {
@@ -46,12 +58,32 @@ object Transform {
         writeDataframe(hc, config.outputDir + "/tableschema", tables_string)
 
         val tablesMap = tables.collect.map(r => (r.getString(0), r.getSeq[String](1)))
+        def extractTable(columns:Seq[String]) =
+          data.select(columns.intersect(dataCols).map(x => data.col(x)) : _*).distinct()
 
-        tablesMap.foreach {
-          case (table, columns) =>
-            println("processing table " + table)
-            val df = data.select(columns.intersect(dataCols).map(x => data.col(x)) : _*).distinct()
-            writeDataframe(hc, config.outputDir + "/tables/" + table, df, header = true)
+        config.jdbcUrl match {
+          case Some(jdbcUrl) =>
+            val driverClass = config.driverClass.get
+            Class.forName(driverClass)
+            val connectionProperties = new Properties()
+
+            connectionProperties.put("user", s"${config.jdbcUser.get}")
+            connectionProperties.put("password", s"${config.jdbcPassword.get}")
+            connectionProperties.put("Driver", driverClass)
+            tablesMap.foreach {
+              case (table, columns) =>
+                println("processing table " + table)
+                val df = extractTable(columns)
+                df.write.mode(SaveMode.Overwrite).jdbc(jdbcUrl, s"${table}", connectionProperties)
+            }
+
+          case None =>
+            tablesMap.foreach {
+              case (table, columns) =>
+                println("processing table " + table)
+                val df = extractTable(columns)
+                writeDataframe(hc, s"${config.outputDir}/tables/${table}", df, header = true)
+            }
         }
 
         spark.stop()
