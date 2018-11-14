@@ -15,10 +15,10 @@ python3 src/main/python/run.py <spark host> <sbc cache dir> --mapping_input_file
 ```
 pip install csvkit
 pip install pymysql
+```
 
 ### populate db
-```
-in output dir,
+In output dir,
 
 ```
 csvsql --db "mysql+pymysql://<uid>:<pwd>@<host>/<db>" --insert tables/*
