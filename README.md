@@ -18,7 +18,7 @@ pip install pymysql
 ```
 
 ### populate db
-In output dir,
+In output dir, execute
 
 ```
 csvsql --db "mysql+pymysql://<uid>:<pwd>@<host>/<db>" --insert tables/*
