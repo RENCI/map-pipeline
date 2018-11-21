@@ -14,12 +14,20 @@ python3 src/main/python/run.py <spark host> <sbc cache dir> --mapping_input_file
 
 ```
 pip install csvkit
-pip install pymysql
+pip install psycopg2-binary
+```
+
+### create db
+
+```
+create user <uid> with password '<pwd>';
+create database "<db>";
+grant all on database "<db>" to <uid>;
 ```
 
 ### populate db
 In output dir, execute
 
 ```
-csvsql --db "mysql+pymysql://<uid>:<pwd>@<host>/<db>" --insert tables/*
+csvsql --db "mysql+pymysql://<uid>:<pwd>@<host>/<db>" --insert --overwrite -p \\ -e utf8 tables/*
 ```

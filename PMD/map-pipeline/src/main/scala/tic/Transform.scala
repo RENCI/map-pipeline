@@ -42,7 +42,16 @@ object Transform {
         import spark.implicits._
         val mappingCols = mapping.select("column").map(x => x.getString(0)).collect().toSeq
         val dataCols = data.columns.toSeq
-        val unknown = dataCols.diff(mappingCols).toDF("column")
+        def code(s:String) = 
+          s.indexOf("___") match {
+            case -1 =>
+              s
+            case i =>
+              s.substring(0, i)
+          }
+
+        val dataCols2 = dataCols.map(code)
+        val unknown = dataCols2.diff(mappingCols).toDF("column")
         val missing = mappingCols.diff(dataCols).toDF("colums")
         val hc = spark.sparkContext.hadoopConfiguration
         writeDataframe(hc, config.outputDir + "/unknown", unknown)
@@ -53,8 +62,14 @@ object Transform {
           case _    => s"""[${vs.mkString(",")}]"""
         })
 
-        val tables = mapping.groupBy("table").agg(collect_list("column").as("columns"))
-        val tables_string = tables.select(stringify(tables.col("columns")))
+        val columns = dataCols.toDF("column0")
+        val codeUdf = udf(code _)
+        val columnTables = columns.withColumn("column", codeUdf($"column0").as("column")).join(mapping, "column").drop("column").withColumnRenamed("column0", "column").filter($"table".isNotNull)
+
+        val tables = columnTables.groupBy("table").agg(collect_list("column").as("columns"))
+          
+
+        val tables_string = tables.select($"table", stringify($"columns"))
         writeDataframe(hc, config.outputDir + "/tableschema", tables_string)
 
         val tablesMap = tables.collect.map(r => (r.getString(0), r.getSeq[String](1)))
