@@ -29,5 +29,5 @@ grant all on database "<db>" to <uid>;
 In output dir, execute
 
 ```
-csvsql --db "mysql+pymysql://<uid>:<pwd>@<host>/<db>" --insert --overwrite -p \\ -e utf8 tables/*
+csvsql --db "postgresql://<uid>:<pwd>@<host>/<db>" --insert --overwrite -p \\ -e utf8 tables/*
 ```
