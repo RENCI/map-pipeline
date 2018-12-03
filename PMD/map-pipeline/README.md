@@ -7,7 +7,7 @@ sbt package
 
 ### process data
 ```
-python3 src/main/python/run.py <spark host> <sbc cache dir> --mapping_input_file <mapping file> --data_input_file <data file> --output_dir <output dir>
+python3 src/main/python/run.py <spark host> <sbt cache dir> --mapping_input_file <mapping file> --data_input_file <data file> --output_dir <output dir>
 ```
 
 ### install csvkit
