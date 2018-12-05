@@ -90,7 +90,8 @@ object Transform {
           .groupBy("table", "column2").agg(collect_list("column").as("columns"))
           .groupBy("table").agg(joinMap(collect_list(map($"column2", $"columns"))).as("columns2"))
 
-        val tablesMap = columnToCopyTables.join(columnToUnpivotTables, "table").collect.map(r => (r.getString(r.fieldIndex("table")), r.getSeq[String](r.fieldIndex("columns")), r.getMap[String, Seq[String]](r.fieldIndex("columns2")).toMap))
+        println("copy " + columnToCopyTables.select("table").collect() + " unpivot " + columnToUnpivotTables.select("table").collect())
+        val tablesMap = columnToCopyTables.join(columnToUnpivotTables, Seq("table"), "outer").collect.map(r => (r.getString(r.fieldIndex("table")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq()), Option(r.getMap[String, Seq[String]](r.fieldIndex("columns2"))).map(_.toMap).getOrElse(Map())))
 
         def extractTable(columns:Seq[String], unpivots:Map[String, Seq[String]]) = {
           val df = data.select((columns ++ unpivots.values.flatten).map(data.col _) : _*).distinct()
