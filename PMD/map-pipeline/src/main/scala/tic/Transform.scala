@@ -34,8 +34,8 @@ object Transform {
         val spark = SparkSession.builder.appName("Transform").getOrCreate()
         spark.sparkContext.setLogLevel("WARN")
 
-        val mapping = spark.read.format("csv").option("header", true).load(config.mappingInputFile).distinct
-        val data = spark.read.format("csv").option("header", true).load(config.dataInputFile)
+        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).distinct
+        val data = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.dataInputFile)
 
         import spark.implicits._
         def copyFilter(s:String) : Option[String] = 
