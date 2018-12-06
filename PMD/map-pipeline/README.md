@@ -1,4 +1,4 @@
-# tic
+# pipeline
 
 ### compile code
 ```
@@ -12,7 +12,7 @@ sed -i 's/""/\\\\"/g' <data file>
 ```
 
 ```
-python3 src/main/python/run.py <spark host> <sbc cache dir> --mapping_input_file <mapping file> --data_input_file <data file> --output_dir <output dir>
+python3 src/main/python/run.py <spark host> <sbt cache dir> --mapping_input_file <mapping file> --data_input_file <data file> --output_dir <output dir>
 ```
 
 ### install csvkit
@@ -34,5 +34,9 @@ grant all on database "<db>" to <uid>;
 In output dir, execute
 
 ```
+<<<<<<< HEAD
 csvsql --db "postgresql://<uid>:<pwd>@<host>/<db>" --insert --overwrite -p \\ -e utf8 --date-format "%y-%M-%d" tables/*
+=======
+csvsql --db "postgresql://<uid>:<pwd>@<host>/<db>" --insert --overwrite -p \\ -e utf8 tables/*
+>>>>>>> 332092925b72359dafe44195346ecac1b32466ea
 ```
