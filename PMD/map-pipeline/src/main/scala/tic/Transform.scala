@@ -112,11 +112,26 @@ object Transform {
 
         tablesMap.foreach {
           case (table, columnsToCopy, columnsToUnpivot) =>
-            println("processing table " + table)
-            println("copy columns " + columnsToCopy.mkString("[", ",", "]"))
-            val df = extractTable(columnsToCopy, columnsToUnpivot)
-            writeDataframe(hc, s"${config.outputDir}/tables/${table}", df, header = true)
+            val file = s"${config.outputDir}/tables/${table}"
+            if (fileExists(hc, file)) {
+              println(file + " exists")
+            } else {
+              println("processing table " + table)
+              println("copy columns " + columnsToCopy.mkString("[", ",", "]"))
+              val df = extractTable(columnsToCopy, columnsToUnpivot)
+              writeDataframe(hc, file, df, header = true)
+            }
         }
+
+        val extendColumnPrefix = "reviewer_name_"
+        val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
+        println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
+        val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
+          val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer".isNotNull).distinct
+          val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
+          reviewers.withColumn("organization", lit(organization))
+        }).reduce(_ union _)
+        writeDataframe(hc, s"${config.outputDir}/tables/reviewer_organization", df, header = true)
 
         spark.stop()
       case None =>
