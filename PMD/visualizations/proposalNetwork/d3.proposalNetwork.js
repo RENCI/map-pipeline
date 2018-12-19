@@ -80,6 +80,10 @@
     function processData() {
       console.log(data);
 
+      var ticNames = d3.scaleOrdinal()
+          .domain([-1, 1, 2, 3, 4])
+          .range(["NA", "Duke/VUMC", "Utah", "JHU/Tufts", "VUMC"]);
+
       // First get all unique PIs, proposals, and orgs
       var pis = d3.map(),
           proposals = d3.map(),
@@ -124,7 +128,7 @@
       };
 
       function tic_id(d) {
-        return d.tic_ric_assign_v2 === "" ? "NA" : d.tic_ric_assign_v2;
+        return d.tic_ric_assign_v2 === "" ? -1 : +d.tic_ric_assign_v2;
       }
 
       function pi_id(d) {
@@ -162,7 +166,7 @@
 
             case "tic":
               // XXX: Name placeholder
-              node.name = id;
+              node.name = ticNames(id);
               break;
           };
 
@@ -315,25 +319,25 @@
             })
             .call(drag);
 
-        nodeEnter.append("circle")
-            .style("stroke", "black");
+        nodeEnter.append("circle");
 
         // Node update
         nodeEnter.merge(node)
             .attr("data-original-title", nodeLabel)
           .select("circle")
-            .attr("r", nodeRadius)
-            .style("fill", nodeFill);
+            .attr("r", nodeRadius);
 
         // Node exit
         node.exit().remove();
+
+        highlightNode();
 
         function highlightNode(d) {
           if (d) {
             // Change link appearance
             svg.select(".network").selectAll(".link")
                 .style("stroke", function(e) {
-                  return nodeLinkConnected(d, e) ? "black" : "#eee";
+                  return nodeLinkConnected(d, e) ? "#666" : "#eee";
                 })
                 .filter(function(e) {
                   return nodeLinkConnected(d, e);
@@ -380,7 +384,7 @@
           }
           else {
             svg.select(".network").selectAll(".link")
-                .style("stroke", "black");
+                .style("stroke", "#666");
 
             svg.select(".network").selectAll(".node").select("circle")
                 .style("fill", nodeFill)
@@ -425,8 +429,7 @@
         // Link enter
         var linkEnter = link.enter().append("line")
             .attr("class", "link")
-            .style("fill", "none")
-            .style("stroke", "black");
+            .style("fill", "none");
 
         // Link exit
         link.exit().remove();
