@@ -90,13 +90,10 @@
             p = d.proposal_id,
             o = d.org_name;
 
-        addNode(pis, name(d), "pi");
-        addNode(proposals, d.proposal_id, "proposal");
-        addNode(orgs, d.org_name, "org");
+        addNode(d, pis, name(d), "pi");
+        addNode(d, proposals, d.proposal_id, "proposal");
+        addNode(d, orgs, d.org_name, "org");
       });
-
-      // Initialize objects for each
-      console.log(pis.values());
 
       // Now link
       var links = [];
@@ -124,16 +121,39 @@
       };
 
       function name(d) {
-        return d.pi_firstname + "_" + d.pi_lastname
+        return d.pi_firstname + "_" + d.pi_lastname;
       }
 
-      function addNode(map, key, type) {
-        if (!map.has(key)) {
-          map.set(key, {
+      function addNode(d, map, id, type) {
+        if (!map.has(id)) {
+          var node = {
             type: type,
-            name: key,
+            id: id,
             links: []
-          });
+          };
+
+          switch (type) {
+            case "pi":
+              node.firsName = d.pi_firstname;
+              node.lastName = d.pi_lastname;
+              node.name = d.pi_lastname + ", " + d.pi_firstname;
+              break;
+
+            case "proposal":
+              // XXX: Name placeholder
+              node.name = id;
+              node.budget = d.anticipated_budget.length > 0 ? d.anticipated_budget : "NA";
+              node.duration = d.funding_duration > 0 ? d.funding_duration : "NA";
+              node.status = d.protocol_status > 0 ? d.protocol_status : "NA";
+              break;
+
+            case "org":
+              // XXX: Name placeholder
+              node.name = id;
+              break;
+          };
+
+          map.set(id, node);
         }
       }
 
@@ -172,13 +192,13 @@
 
       // Set force directed network
       force
+          .nodes(network.nodes)
           .force("center", d3.forceCenter(width / 2, height / 2))
           .force("manyBody", d3.forceManyBody().strength(manyBodyStrength))
           .force("collide", d3.forceCollide().radius(nodeRadius))
           .force("x", d3.forceX(width / 2))
           .force("y", d3.forceY(height / 2))
-          .nodes(network.nodes)
-          .force("link").links(network.links)
+          .force("link").links(network.links);
 
       force
           .alpha(1)
@@ -188,7 +208,43 @@
       drawNodes();
       drawLinks();
 
+      // Tooltips
+      $(".proposalNetwork .node").tooltip({
+        container: "body",
+        placement: "top",
+        animation: false,
+        html: true
+      });
+
       function drawNodes() {
+        // Drag behavior, based on:
+        // http://bl.ocks.org/mbostock/2675ff61ea5e063ede2b5d63c08020c7
+        var drag = d3.drag()
+            .on("start", function(d) {
+              if (!d3.event.active) {
+                force.alphaTarget(0.3).restart();
+              }
+
+              d.fx = d.x;
+              d.fy = d.y;
+            })
+            .on("drag", function(d) {
+              d.fx = d3.event.x;
+              d.fy = d3.event.y;
+
+              $(this).tooltip("show");
+            })
+            .on("end", function(d) {
+              if (!d3.event.active) {
+                force.alphaTarget(0).alpha(1).restart();
+              }
+
+              d.fx = null;
+              d.fy = null;
+
+              $(this).tooltip("hide");
+            });
+
         // Create scales
         var nodeColorScale = d3.scaleOrdinal(d3.schemeCategory10)
             .domain(network.nodeTypes);
@@ -205,18 +261,38 @@
 
         // Node enter
         var nodeEnter = node.enter().append("g")
-            .attr("class", "node");
+            .attr("class", "node")
+            .attr("data-toggle", "tooltip")
+            .call(drag);
 
         nodeEnter.append("circle")
             .style("stroke", "black");
 
         // Node update
-        nodeEnter.merge(node).select("circle")
+        nodeEnter.merge(node)
+            .attr("data-original-title", nodeLabel)
+          .select("circle")
             .attr("r", nodeRadius)
             .style("fill", nodeFill);
 
         // Node exit
         node.exit().remove();
+
+        function nodeLabel(d) {
+          switch (d.type) {
+            case "pi":
+              return "PI: " + d.name;
+
+            case "proposal":
+              return "Proposal: " + d.name + "<br><br>" +
+                     "Budget: " + d.budget + "<br>" +
+                     "Duration: " + d.duration + "<br>" +
+                     "Status: " + d.status;
+
+            case "org":
+              return "Organization: " + d.name;
+          }
+        }
 
         function nodeFill(d) {
           return nodeColorScale(d.type);
