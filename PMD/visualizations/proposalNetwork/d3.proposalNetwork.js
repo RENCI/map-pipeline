@@ -64,7 +64,7 @@
             .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
         // Groups for layout
-        var groups = ["links", "nodes"];
+        var groups = ["network"];
 
         g.selectAll("g")
             .data(groups)
@@ -136,6 +136,7 @@
           var node = {
             type: type,
             id: id,
+            proposals: [],
             links: []
           };
 
@@ -176,19 +177,33 @@
           type: node1.type + "_" + node2.type
         };
 
+        // Keep track of proposals for ease when highlighting
+        if (node1.type === "proposal") {
+          addProposal(node1, node1);
+          addProposal(node2, node1);
+        }
+        else if (node2.type === "proposal") {
+          addProposal(node1, node2);
+          addProposal(node2, node2);
+        }
+
         node1.links.push(link);
         node2.links.push(link);
         links.push(link);
       }
+
+      function addProposal(node, proposal) {
+        if (node.proposals.indexOf(proposal) === -1) node.proposals.push(proposal);
+      }
     }
 
     function updateForce() {
-      svg.select(".nodes").selectAll(".node")
+      svg.select(".network").selectAll(".node")
           .attr("transform", function(d) {
             return "translate(" + d.x + "," + d.y + ")";
           });
 
-      svg.select(".links").selectAll(".link")
+      svg.select(".network").selectAll(".link")
           .attr("x1", function(d) { return d.source.x; })
           .attr("y1", function(d) { return d.source.y; })
           .attr("x2", function(d) { return d.target.x; })
@@ -223,13 +238,14 @@
           .restart();
 
       // Draw the visualization
-      drawNodes();
       drawLinks();
+      drawNodes();
 
       // Tooltips
       $(".proposalNetwork .node").tooltip({
         container: "body",
         placement: "top",
+        trigger: "manual",
         animation: false,
         html: true
       });
@@ -237,6 +253,8 @@
       function drawNodes() {
         // Drag behavior, based on:
         // http://bl.ocks.org/mbostock/2675ff61ea5e063ede2b5d63c08020c7
+        var dragNode = null;
+
         var drag = d3.drag()
             .on("start", function(d) {
               if (!d3.event.active) {
@@ -245,6 +263,8 @@
 
               d.fx = d.x;
               d.fy = d.y;
+
+              dragNode = d;
             })
             .on("drag", function(d) {
               d.fx = d3.event.x;
@@ -260,6 +280,10 @@
               d.fx = null;
               d.fy = null;
 
+              dragNode = null;
+
+              highlightNode();
+
               $(this).tooltip("hide");
             });
 
@@ -268,13 +292,27 @@
             .domain(network.nodeTypes);
 
         // Bind nodes
-        var node = svg.select(".nodes").selectAll(".node")
+        var node = svg.select(".network").selectAll(".node")
             .data(network.nodes);
 
         // Node enter
         var nodeEnter = node.enter().append("g")
             .attr("class", "node")
             .attr("data-toggle", "tooltip")
+            .on("mouseover", function(d) {
+              if (dragNode) return;
+
+              highlightNode(d);
+
+              $(this).tooltip("show");
+            })
+            .on("mouseout", function(d) {
+              if (dragNode) return;
+
+              highlightNode();
+
+              $(this).tooltip("hide");
+            })
             .call(drag);
 
         nodeEnter.append("circle")
@@ -290,10 +328,73 @@
         // Node exit
         node.exit().remove();
 
+        function highlightNode(d) {
+          if (d) {
+            // Change link appearance
+            svg.select(".network").selectAll(".link")
+                .style("stroke", function(e) {
+                  return nodeLinkConnected(d, e) ? "black" : "#eee";
+                })
+                .filter(function(e) {
+                  return nodeLinkConnected(d, e);
+                }).raise();
+
+            // Change node appearance
+            svg.select(".network").selectAll(".node").select("circle")
+                .style("fill", function(e) {
+                  return nodesConnected(d, e) ? nodeFill(e) : "white";
+                })
+                .style("stroke", function(e) {
+                  return nodesConnected(d, e) ? "black" : "#eee";
+                })
+                .filter(function(e) {
+                  return nodesConnected(d, e);
+                }).raise();
+
+            // Sort links
+            svg.select(".network").selectAll(".link")
+                .filter(function(e) {
+                  return nodeLinkConnected(d, e);
+                }).raise();
+
+            // Sort nodes
+            svg.select(".network").selectAll(".node")
+                .filter(function(e) {
+                  return nodesConnected(d, e);
+                }).raise();
+
+            function nodesConnected(n1, n2) {
+              for (var i = 0; i < n1.proposals.length; i++) {
+                if (n2.proposals.indexOf(n1.proposals[i]) !== -1) return true;
+              }
+
+              return false;
+            }
+
+            function nodeLinkConnected(n, l) {
+              if (n.proposals.indexOf(l.source) !== -1) return true;
+              if (n.proposals.indexOf(l.target) !== -1) return true;
+
+              return false;
+            }
+          }
+          else {
+            svg.select(".network").selectAll(".link")
+                .style("stroke", "black");
+
+            svg.select(".network").selectAll(".node").select("circle")
+                .style("fill", nodeFill)
+                .style("stroke", "black");
+
+            svg.select(".network").selectAll(".node").raise();
+          }
+        }
+
         function nodeLabel(d) {
           switch (d.type) {
             case "pi":
-              return "PI: " + d.name;
+              return "PI: " + d.name + "<br><br>" +
+                     "Proposals: " + d.proposals.length;
 
             case "proposal":
               return "Proposal: " + d.name + "<br><br>" +
@@ -302,10 +403,12 @@
                      "Status: " + d.status;
 
             case "org":
-              return "Organization: " + d.name;
+              return "Organization: " + d.name + "<br><br>" +
+                     "Proposals: " + d.proposals.length;
 
             case "tic":
-              return "TIC: " + d.name;
+              return "TIC: " + d.name + "<br><br>" +
+                     "Proposals: " + d.proposals.length;
           }
         }
 
@@ -316,7 +419,7 @@
 
       function drawLinks() {
         // Bind data for links
-        var link = svg.select(".links").selectAll(".link")
+        var link = svg.select(".network").selectAll(".link")
             .data(network.links);
 
         // Link enter
@@ -331,7 +434,7 @@
     }
 
     function nodeRadius(d) {
-      return radiusScale(d.links.length);
+      return d.type === "proposal" ? radiusScale(1) : radiusScale(d.links.length);
     }
 
     // Getters/setters
