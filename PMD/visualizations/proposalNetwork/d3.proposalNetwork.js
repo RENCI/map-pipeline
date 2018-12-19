@@ -83,31 +83,34 @@
       // First get all unique PIs, proposals, and orgs
       var pis = d3.map(),
           proposals = d3.map(),
-          orgs = d3.map();
+          orgs = d3.map(),
+          tics = d3.map();
 
       data.forEach(function(d) {
-        var n = name(d),
-            p = d.proposal_id,
-            o = d.org_name;
-
-        addNode(d, pis, name(d), "pi");
+        addNode(d, pis, pi_id(d), "pi");
         addNode(d, proposals, d.proposal_id, "proposal");
         addNode(d, orgs, d.org_name, "org");
+        addNode(d, tics, tic_id(d), "tic");
       });
 
       // Now link
       var links = [];
 
       data.forEach(function(d) {
-        var pi = pis.get(name(d)),
+        var pi = pis.get(pi_id(d)),
             proposal = proposals.get(d.proposal_id),
-            org = orgs.get(d.org_name);
+            org = orgs.get(d.org_name),
+            tic = tics.get(tic_id(d));
 
         addLink(pi, proposal);
         addLink(proposal, org);
+        addLink(proposal, tic);
       });
 
-      var nodes = pis.values().concat(proposals.values()).concat(orgs.values());
+      var nodes = pis.values()
+          .concat(proposals.values())
+          .concat(orgs.values()
+          .concat(tics.values()));
 
       var nodeTypes = nodes.reduce(function(p, c) {
         if (p.indexOf(c.type) === -1) p.push(c.type);
@@ -120,7 +123,11 @@
         links: links
       };
 
-      function name(d) {
+      function tic_id(d) {
+        return d.tic_ric_assign_v2 === "" ? "NA" : d.tic_ric_assign_v2;
+      }
+
+      function pi_id(d) {
         return d.pi_firstname + "_" + d.pi_lastname;
       }
 
@@ -148,6 +155,11 @@
               break;
 
             case "org":
+              // XXX: Name placeholder
+              node.name = id;
+              break;
+
+            case "tic":
               // XXX: Name placeholder
               node.name = id;
               break;
@@ -291,6 +303,9 @@
 
             case "org":
               return "Organization: " + d.name;
+
+            case "tic":
+              return "TIC: " + d.name;
           }
         }
 
