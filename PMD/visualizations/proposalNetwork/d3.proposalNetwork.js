@@ -32,7 +32,7 @@
             .on("tick", updateForce),
 
         // Appearance
-        radiusRange = [4, 20],
+        radiusRange = [4, 32],
 
         // Scales
         radiusScale = d3.scaleSqrt(),
@@ -202,6 +202,12 @@
 
       var manyBodyStrength = -0.02 / network.nodes.length * width * height;
 
+      radiusScale
+          .domain([0, d3.max(network.nodes, function(d) {
+            return d.links.length;
+          })])
+          .range(radiusRange);
+
       // Set force directed network
       force
           .nodes(network.nodes)
@@ -257,15 +263,9 @@
               $(this).tooltip("hide");
             });
 
-        // Create scales
+        // Color scale
         var nodeColorScale = d3.scaleOrdinal(d3.schemeCategory10)
             .domain(network.nodeTypes);
-
-        radiusScale
-            .domain([0, d3.max(network.nodes, function(d) {
-              return d.links.length;
-            })])
-            .range(radiusRange);
 
         // Bind nodes
         var node = svg.select(".nodes").selectAll(".node")
