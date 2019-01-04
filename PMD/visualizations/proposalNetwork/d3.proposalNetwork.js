@@ -155,8 +155,8 @@
               // XXX: Name placeholder
               node.name = id;
               node.budget = d.anticipated_budget.length > 0 ? d.anticipated_budget : "NA";
-              node.duration = d.funding_duration > 0 ? d.funding_duration : "NA";
-              node.status = d.protocol_status > 0 ? d.protocol_status : "NA";
+              node.duration = d.funding_duration.length > 0 ? d.funding_duration : "NA";
+              node.status = d.protocol_status.length > 0 ? +d.protocol_status : "NA";
               break;
 
             case "org":
