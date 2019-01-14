@@ -64,7 +64,7 @@
             .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
         // Groups for layout
-        var groups = ["network"];
+        var groups = ["network", "labels"];
 
         g.selectAll("g")
             .data(groups)
@@ -79,6 +79,21 @@
 
     function processData() {
       console.log(data);
+
+      // Filter any proposals without a TIC
+      data = data.filter(function(d) {
+        return tic_id(d) !== -1;
+      });
+
+      // Filter identified test proposals
+      var testProposals = [
+        168, 200, 220, 189, 355, 390, 272, 338, 308, 309, 394, 286, 306, 401,
+        390, 272, 306, 338, 200, 286, 220, 168, 401
+      ];
+
+      data = data.filter(function(d) {
+        return testProposals.indexOf(+d.proposal_id) === -1;
+      })
 
       var ticNames = d3.scaleOrdinal()
           .domain([-1, 1, 2, 3, 4])
@@ -212,6 +227,11 @@
           .attr("y1", function(d) { return d.source.y; })
           .attr("x2", function(d) { return d.target.x; })
           .attr("y2", function(d) { return d.target.y; });
+
+      svg.select(".labels").selectAll(".ticLabel")
+          .attr("transform", function(d) {
+            return "translate(" + d.x + "," + d.y + ")";
+          });
     }
 
     function draw() {
@@ -244,6 +264,7 @@
       // Draw the visualization
       drawLinks();
       drawNodes();
+      drawLabels();
 
       // Tooltips
       $(".proposalNetwork .node").tooltip({
@@ -269,6 +290,8 @@
               d.fy = d.y;
 
               dragNode = d;
+
+              $(this).tooltip("show");
             })
             .on("drag", function(d) {
               d.fx = d3.event.x;
@@ -355,6 +378,15 @@
                   return nodesConnected(d, e);
                 }).raise();
 
+            // Change label appearance
+            svg.select(".labels").selectAll(".foreground")
+                .style("fill", function(e) {
+                  return nodesConnected(d, e) ? "black" : "#ddd";
+                })
+                .filter(function(e) {
+                  return nodesConnected(d, e);
+                }).raise();
+
             // Sort links
             svg.select(".network").selectAll(".link")
                 .filter(function(e) {
@@ -383,12 +415,16 @@
             }
           }
           else {
+            // Reset
             svg.select(".network").selectAll(".link")
                 .style("stroke", "#666");
 
             svg.select(".network").selectAll(".node").select("circle")
                 .style("fill", nodeFill)
                 .style("stroke", "black");
+
+            svg.select(".labels").selectAll(".foreground")
+                .style("fill", "black");
 
             svg.select(".network").selectAll(".node").raise();
           }
@@ -427,12 +463,54 @@
             .data(network.links);
 
         // Link enter
-        var linkEnter = link.enter().append("line")
+        link.enter().append("line")
             .attr("class", "link")
             .style("fill", "none");
 
         // Link exit
         link.exit().remove();
+      }
+
+      function drawLabels() {
+        // Bind TIC data
+        var label = svg.select(".labels").selectAll(".ticLabel")
+            .data(network.nodes.filter(function(d) {
+              return d.type === "tic";
+            }), function(d) {
+              return d.id;
+            });
+
+        // Label enter
+        var labelEnter = label.enter().append("g")
+            .attr("class", "ticLabel")
+            .style("pointer-events", "none");
+
+        labelEnter.append("text")
+            .attr("class", "background")
+            .text(function(d) {
+              return d.name;
+            })
+            .style("text-anchor", "middle")
+            .style("font-size", "small")
+            .style("font-weight", "bold")
+            .style("dominant-baseline", "middle")
+            .style("stroke", "white")
+            .style("stroke-width", 3)
+            .style("stroke-opacity", 0.5);
+
+        labelEnter.append("text")
+            .attr("class", "foreground")
+            .text(function(d) {
+              return d.name;
+            })
+            .style("text-anchor", "middle")
+            .style("font-size", "small")
+            .style("font-weight", "bold")
+            .style("dominant-baseline", "middle")
+            .style("fill", "black");
+
+        // Label exit
+        label.exit().remove();
       }
     }
 
