@@ -64,7 +64,7 @@
             .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
         // Groups for layout
-        var groups = ["network", "labels"];
+        var groups = ["network", "labels", "legend"];
 
         g.selectAll("g")
             .data(groups)
@@ -247,6 +247,10 @@
           })])
           .range(radiusRange);
 
+      // Color scale
+      var nodeColorScale = d3.scaleOrdinal(d3.schemeCategory10)
+          .domain(network.nodeTypes);
+
       // Set force directed network
       force
           .nodes(network.nodes)
@@ -265,6 +269,7 @@
       drawLinks();
       drawNodes();
       drawLabels();
+      drawLegend();
 
       // Tooltips
       $(".proposalNetwork .node").tooltip({
@@ -314,13 +319,11 @@
               $(this).tooltip("hide");
             });
 
-        // Color scale
-        var nodeColorScale = d3.scaleOrdinal(d3.schemeCategory10)
-            .domain(network.nodeTypes);
-
         // Bind nodes
         var node = svg.select(".network").selectAll(".node")
-            .data(network.nodes);
+            .data(network.nodes, function(d) {
+              return d.id;
+            });
 
         // Node enter
         var nodeEnter = node.enter().append("g")
@@ -511,6 +514,45 @@
 
         // Label exit
         label.exit().remove();
+      }
+
+      function drawLegend() {
+        let types = network.nodeTypes;
+
+        var r = radiusScale(1);
+
+        var yScale = d3.scaleBand()
+            .domain(types)
+            .range([r + 1, (r * 2.5) * (types.length + 1)]);
+
+        // Bind node type data
+        var node = svg.select(".legend")
+            .attr("transform", "translate(" + (r + 1) + ",0)")
+        .selectAll(".legendNode")
+            .data(types);
+
+        // Enter
+        nodeEnter = node.enter().append("g")
+            .attr("class", "legendNode")
+            .attr("transform", function(d) {
+              return "translate(0," + yScale(d) + ")";
+            });
+
+        nodeEnter.append("circle")
+            .attr("r", r)
+            .style("fill", function(d) {
+              return nodeColorScale(d);
+            })
+            .style("stroke", "black");
+
+        nodeEnter.append("text")
+            .text(function(d) { return d; })
+            .attr("x", r * 1.5)
+            .style("font-size", "small")
+            .style("dominant-baseline", "middle");
+
+        // Node exit
+        node.exit().remove();
       }
     }
 
