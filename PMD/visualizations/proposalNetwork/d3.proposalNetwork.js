@@ -24,7 +24,7 @@
 
         // Data
         data = [],
-        network = [],
+        network = {},
 
         // Layout
         force = d3.forceSimulation()
@@ -78,8 +78,6 @@
     }
 
     function processData() {
-      console.log(data);
-
       // Filter any proposals without a TIC
       data = data.filter(function(d) {
         return tic_id(d) !== -1;
@@ -93,7 +91,31 @@
 
       data = data.filter(function(d) {
         return testProposals.indexOf(+d.proposal_id) === -1;
-      })
+      });
+
+      // Flatten data
+      // XXX: Do this in the query instead?
+      data = data.reduce(function(p, c) {
+        var id = c.proposal_id;
+        var d = p[id];
+
+        if (d) {
+          // Update with any non-blank values
+          d3.keys(c).forEach(function(key) {
+            if (c[key] !== "") {
+              d[key] = c[key];
+            }
+          });
+        }
+        else {
+          // Start with this version
+          p[id] = c;
+        }
+
+        return p;
+      }, {});
+
+      data = d3.values(data);
 
       var ticNames = d3.scaleOrdinal()
           .domain([-1, 1, 2, 3, 4])
@@ -217,6 +239,31 @@
     }
 
     function updateForce() {
+      if (!network.nodes) return;
+
+      // Arrange proposals around tics
+      var r = radiusScale(1);
+
+      network.nodes.filter(function(d) {
+        return d.type === "proposal";
+      }).forEach(function(d) {
+        var tic = d.links.filter(function(d) {
+          return d.type === "proposal_tic";
+        })[0].target;
+
+        var vx = d.x - tic.x,
+            vy = d.y - tic.y,
+            dist = Math.sqrt(vx * vx + vy * vy);
+
+        vx /= dist;
+        vy /= dist;
+
+        var nr = tic.links.length * r / Math.PI;
+
+        d.x = tic.x + vx * nr;
+        d.y = tic.y + vy * nr;
+      });
+
       svg.select(".network").selectAll(".node")
           .attr("transform", function(d) {
             return "translate(" + d.x + "," + d.y + ")";
