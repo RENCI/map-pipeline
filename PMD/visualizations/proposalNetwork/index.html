@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+  <title>Duke TIC Proposal Network</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css">
+  <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js"></script>
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="d3.proposalNetwork.js"></script>
+</head>
+
+<body>
+
+<div class="jumbotron text-center">
+  <h1>Duke TIC Proposal Network</h1>
+</div>
+
+<div class="container-fluid text-center">
+  <div id="networkDiv" class="mb-4"></div>
+</div>
+
+<script>
+
+let network = d3.proposalNetwork()
+    .width(1000)
+    .height(1000);
+
+// Load the data
+d3.csv("data/borland_01.csv")
+  .then(function(data) {
+      // Create the visualization
+      d3.select("#networkDiv")
+          .datum(data)
+        .call(network);
+  })
+  .catch(function(error){
+     console.log(error);
+  });
+
+</script>
+
+</body>
+</html>
