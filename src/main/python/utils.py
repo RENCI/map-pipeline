@@ -13,7 +13,7 @@ def submit(host_name, cache_dir, cls, *args, **kwargs):
 
     cmd = ["spark-submit",
            "--master",
-           "spark://{0}:7077".format(host_name),
+           host_name,
            "--jars"] + [cache] + [
            "--class",
            cls,
