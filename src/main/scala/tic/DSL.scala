@@ -31,6 +31,7 @@ object DSL {
 
     def value: Parser[AST] = {
       field |
+      "(" ~> term <~ ")" |
         "extract_first_name" ~ value ^^ {
           case _ ~ field =>
             ExtractFirstName(field)
