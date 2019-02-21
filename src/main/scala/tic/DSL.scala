@@ -19,6 +19,99 @@ case class Coalesce(a:AST, b:AST) extends AST
 
 object DSL {
 
+  object NameParser extends RegexParsers {
+    override def skipWhitespace = false
+
+    def name0 : Parser[String] = {
+      "[a-zA-Z]+[a-z]+".r
+    }
+
+    def name : Parser[String] = {
+      name0 ~ ("-" ~ name0).? ^^ {
+        case a ~ None => a
+        case a ~ Some(b ~ c) => a + b + c
+      }
+    }
+
+    def initial : Parser[String] = {
+      "[a-zA-Z]\\.?".r
+    }
+
+    def first_name : Parser[String] = {
+      initial ||| name
+    }
+
+    def middle_name : Parser[String] = {
+      "(" ~> name <~ ")" | (initial ||| name)
+    }
+
+    def last_name : Parser[String] = {
+      name
+    }
+
+    def title0 : Parser[String] = {
+      "MD" |
+      "M.D." |
+      "PhD" |
+      "MPH" |
+      "MBBCH" |
+      "MSCE"
+    }
+
+    def title : Parser[String] = {
+      ",".? ~> " " ~> title0
+    }
+
+    def fml : Parser[Seq[String]] = {
+      first_name ~ ((" " ~> middle_name) ~> (" " ~> last_name)) ^^ {
+          case a ~ b => Seq(a, b)
+      }
+    }
+
+    def fl : Parser[Seq[String]] = {
+      first_name ~ (" " ~> last_name) ^^ {
+        case a ~ b => Seq(a, b)
+      }
+    }
+
+    def lf : Parser[Seq[String]] = {
+      last_name ~ (", " ~> first_name) ^^ {
+        case a ~ b => Seq(b, a)
+      }
+    }
+
+    def l : Parser[Seq[String]] = {
+      last_name ^^ {
+        a => Seq(null, a)
+      }
+    }
+
+    def pi_name0 : Parser[Seq[String]] = {
+      "Dr." ~> " " ~> pi_name0 | (fml ||| fl ||| lf ||| l) <~ title.* <~ " ".?
+    }
+
+    def pi_name : Parser[Seq[String]] = {
+      "unknown" ^^ { _ => Seq("unknown", "unknown") } |
+      "Pending" ^^ { _ => Seq("Pending", "Pending") } |
+      pi_name0
+    }
+
+    def apply(input: String): Seq[String] =
+      if(input == null) {
+        Seq(null, null)
+      }
+      else {
+        parseAll(pi_name, input) match {
+          case Success(result, _) => result
+          case failure: NoSuccess =>
+            println("error parsing pi name " + input + ", " + failure.msg)
+            Seq(null, input)
+        }
+      }
+
+  }
+
+  val parseName = udf(NameParser.apply _)
 
   object DSLParser extends RegexParsers {
 
@@ -30,16 +123,16 @@ object DSL {
     }
 
     def value: Parser[AST] = {
-      field |
       "(" ~> term <~ ")" |
-        "extract_first_name" ~ value ^^ {
-          case _ ~ field =>
-            ExtractFirstName(field)
-        } |
-        "extract_last_name" ~ value ^^ {
-          case _ ~ field =>
-            ExtractLastName(field)
-        }
+      "extract_first_name" ~ value ^^ {
+        case _ ~ field =>
+          ExtractFirstName(field)
+      } |
+      "extract_last_name" ~ value ^^ {
+        case _ ~ field =>
+          ExtractLastName(field)
+      } |
+      field
     }
 
     def term: Parser[AST] = {
@@ -66,9 +159,9 @@ object DSL {
       case N_A => scala.sys.error("n/a")
       case Field(a) => df.col(a)
       case ExtractFirstName(a) =>
-        split(eval(df, a), "\\w+").getItem(0)
+        parseName(eval(df, a)).getItem(0)
       case ExtractLastName(a) =>
-        split(eval(df, a), "\\w+").getItem(1)
+        parseName(eval(df, a)).getItem(1)
       case Coalesce(a, b) =>
         when(eval(df, a).isNull, eval(df, b)).otherwise(eval(df, a))
     }

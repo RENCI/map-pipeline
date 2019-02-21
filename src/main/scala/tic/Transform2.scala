@@ -35,10 +35,9 @@ object Transform2 {
         val hc = spark.sparkContext.hadoopConfiguration
 
         import spark.implicits._
-        def parseFieldname_phase1 = udf(DSLParser.apply _)
 
-        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).select($"Fieldname_HEAL", parseFieldname_phase1($"Fieldname_phase1").as("Fieldname_phase1"), $"Data Type", $"Table_HEAL", $"Key")
-        val data = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.dataInputFile)
+        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Key")
+        var data = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.dataInputFile).filter($"redcap_repeat_instrument".isNull && $"redcap_repeat_instance".isNull)
 
         val pkMap = mapping
           .filter($"Key".like("%primary%"))
@@ -74,16 +73,24 @@ object Transform2 {
 
         val dataCols2 = columnsToCopy ++ columnsToUnpivot
 
+        val datatypes = mapping.select("Fieldname_phase1", "Data Type").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
+        datatypes.filter(x => x._2 == "boolean").map(_._1).foreach {
+          col =>
+          if (dataCols.contains(col)) {
+            data = data.withColumn("tmp", data.col(col).cast(BooleanType)).drop(col).withColumnRenamed("tmp", col)
+          }
+        }
 
 
-        val mappingCols = mapping.distinct.select("Fieldname_phase1").map(x => fields(x.getAs[AST](0))).collect().toSeq.flatten
+
+        val mappingCols = mapping.distinct.select("Fieldname_phase1").map(x => fields(DSLParser(x.getString(0)))).collect().toSeq.flatten
         val unknown = dataCols2.diff(mappingCols).toDF("column")
         val missing = mappingCols.diff(dataCols2).toDF("colums")
 
         writeDataframe(hc, config.outputDir + "/unknown", unknown)
         writeDataframe(hc, config.outputDir + "/missing", missing)
 
-        val containsColumnToCopy = udf((fieldName_phase1 : AST) => fields(fieldName_phase1).intersect(columnsToCopy).nonEmpty)
+        val containsColumnToCopy = udf((fieldName_phase1 : String) => fields(DSLParser(fieldName_phase1)).intersect(columnsToCopy).nonEmpty)
 
         // columns to copy
         val columnToCopyTables = mapping
