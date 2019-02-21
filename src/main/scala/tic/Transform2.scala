@@ -7,6 +7,7 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql._
 import java.util.Properties
 import scala.collection.mutable.Map
+import tic.DSL._
 
 case class Config2(
   mappingInputFile:String = "",
@@ -33,10 +34,12 @@ object Transform2 {
 
         val hc = spark.sparkContext.hadoopConfiguration
 
-        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).select("Fieldname_HEAL", "Fieldname_phase1", "Data Type", "Table_HEAL", "Key")
+        import spark.implicits._
+        def parseFieldname_phase1 = udf(DSLParser.apply _)
+
+        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).select($"Fieldname_HEAL", parseFieldname_phase1($"Fieldname_phase1").as("Fieldname_phase1"), $"Data Type", $"Table_HEAL", $"Key")
         val data = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.dataInputFile)
 
-        import spark.implicits._
         val pkMap = mapping
           .filter($"Key".like("%primary%"))
           .groupBy("Table_HEAL")
@@ -71,17 +74,20 @@ object Transform2 {
 
         val dataCols2 = columnsToCopy ++ columnsToUnpivot
 
-        val mappingCols = mapping.select("Fieldname_phase1").map(x => x.getString(0)).distinct.collect().toSeq
+
+
+        val mappingCols = mapping.distinct.select("Fieldname_phase1").map(x => fields(x.getAs[AST](0))).collect().toSeq.flatten
         val unknown = dataCols2.diff(mappingCols).toDF("column")
         val missing = mappingCols.diff(dataCols2).toDF("colums")
 
-
         writeDataframe(hc, config.outputDir + "/unknown", unknown)
         writeDataframe(hc, config.outputDir + "/missing", missing)
-        
+
+        val containsColumnToCopy = udf((fieldName_phase1 : AST) => fields(fieldName_phase1).intersect(columnsToCopy).nonEmpty)
+
         // columns to copy
-        val columnToCopyTables = columnsToCopy.toDF("Fieldname_phase1")
-          .join(mapping, "Fieldname_phase1")
+        val columnToCopyTables = mapping
+          .filter(containsColumnToCopy($"Fieldname_phase1"))
           .filter($"Table_HEAL".isNotNull)
           .groupBy("Table_HEAL")
           .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL")).as("columns"))
@@ -109,7 +115,7 @@ object Transform2 {
         def extractColumnToCopyTable(columns: Seq[(String, String)]) =
           data.select( columns.map {
             case (fieldname_phase1, fieldname_HEAL) =>
-              data.col(fieldname_phase1).as(fieldname_HEAL)
+              eval(data, DSLParser(fieldname_phase1)).as(fieldname_HEAL)
           } : _*).distinct()
 
         def extractColumnToUnpivotTable(primaryKeys: Seq[(String,String)], column2: String, unpivots: Seq[String]) = {
