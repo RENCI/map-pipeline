@@ -36,3 +36,7 @@ In output dir, execute
 ```
 csvsql --db "postgresql://<uid>:<pwd>@<host>/<db>" --insert --no-create -p \\ -e utf8 --date-format "%y-%M-%d" tables/*
 ```
+
+```
+csvsql --db "postgresql://<uid>:<pwd>@<host>/<db>" --insert --overwrite -p \\ -e utf8 --date-format "%y-%M-%d" reviewer_organization name.csv
+```
