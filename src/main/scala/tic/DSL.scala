@@ -15,6 +15,7 @@ case object N_A extends AST
 case class Field(a:String) extends AST
 case class ExtractFirstName(a:AST) extends AST
 case class ExtractLastName(a:AST) extends AST
+case class GenerateID(a:Seq[AST]) extends AST
 case class Coalesce(a:AST, b:AST) extends AST
 
 object DSL {
@@ -132,6 +133,10 @@ object DSL {
         case _ ~ field =>
           ExtractLastName(field)
       } |
+      "generate_ID" ~ ("(" ~> repsep(value, ",") <~ ")") ^^ {
+        case _ ~ fields =>
+          GenerateID(fields)
+      } |
       field
     }
 
@@ -154,16 +159,18 @@ object DSL {
     }
   }
 
-  def eval(df: DataFrame, ast: AST): Column =
+  def eval(df: DataFrame, col: String, ast: AST): Column =
     ast match {
       case N_A => scala.sys.error("n/a")
       case Field(a) => df.col(a)
       case ExtractFirstName(a) =>
-        parseName(eval(df, a)).getItem(0)
+        parseName(eval(df, col, a)).getItem(0)
       case ExtractLastName(a) =>
-        parseName(eval(df, a)).getItem(1)
+        parseName(eval(df, col, a)).getItem(1)
       case Coalesce(a, b) =>
-        when(eval(df, a).isNull, eval(df, b)).otherwise(eval(df, a))
+        when(eval(df, col, a).isNull, eval(df, col, b)).otherwise(eval(df, col, a))
+      case GenerateID(_) =>
+        df.col(col)
     }
 
   def fields(ast: AST): Seq[String] =
@@ -176,6 +183,8 @@ object DSL {
         fields(a)
       case Coalesce(a, b) =>
         fields(a).union(fields(b))
+      case GenerateID(as) =>
+        as.map(fields).reduce(_ union _)
     }
 }
 

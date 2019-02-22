@@ -90,6 +90,32 @@ object Transform2 {
         writeDataframe(hc, config.outputDir + "/unknown", unknown)
         writeDataframe(hc, config.outputDir + "/missing", missing)
 
+        val generateIDCols = mapping.select("Fieldname_HEAL", "Fieldname_phase1").distinct.collect.flatMap(x => {
+          val ast = DSLParser(x.getString(1))
+          ast match {
+            case GenerateID(as) => Some((x.getString(0), as))
+            case _ => None
+          }
+        }).toSeq
+
+        generateIDCols.foreach {
+          case (col, as) =>
+            println("generating ID for column " + col)
+            val cols2 = as.zip((0 until as.size).map("col" + _))
+            cols2.foreach {
+              case (ast, col2) =>
+                data = data.withColumn(col2, eval(data, col2, ast))
+            }
+            val df2 = data.select(cols2.map({case (_, col2) => data.col(col2)}) : _*).distinct.withColumn(col, monotonicallyIncreasingId)
+            data = data.join(df2, cols2.map({case (_, col2) => col2}), "left")
+            cols2.foreach {
+              case (_, col2) =>
+                data = data.drop(col2)
+            }
+        }
+
+        data.cache()
+
         val containsColumnToCopy = udf((fieldName_phase1 : String) => fields(DSLParser(fieldName_phase1)).intersect(columnsToCopy).nonEmpty)
 
         // columns to copy
@@ -122,7 +148,7 @@ object Transform2 {
         def extractColumnToCopyTable(columns: Seq[(String, String)]) =
           data.select( columns.map {
             case (fieldname_phase1, fieldname_HEAL) =>
-              eval(data, DSLParser(fieldname_phase1)).as(fieldname_HEAL)
+              eval(data, fieldname_HEAL, DSLParser(fieldname_phase1)).as(fieldname_HEAL)
           } : _*).distinct()
 
         def extractColumnToUnpivotTable(primaryKeys: Seq[(String,String)], column2: String, unpivots: Seq[String]) = {
@@ -196,7 +222,7 @@ object Transform2 {
           val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
           reviewers.withColumn("organization", lit(organization))
         }).reduce(_ union _)
-        writeDataframe(hc, s"${config.outputDir}/tables/reviewer_organization", df, header = true)
+        writeDataframe(hc, s"${config.outputDir}/reviewer_organization", df, header = true)
 
         spark.stop()
       case None =>
