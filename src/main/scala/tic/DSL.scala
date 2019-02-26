@@ -124,7 +124,7 @@ object DSL {
             } else if (input.contains("for")) {
               parse2(input.split("for")(0).trim)
             } else {
-              println("cannot parsing pi name for special cases " + input + ", " + failure.msg)
+              println("cannot parse pi name for special cases " + input + ", " + failure.msg)
               Seq(null, input)
             }
         }
