@@ -12,6 +12,7 @@ def submit(host_name, cache_dir, cls, *args, **kwargs):
     cache = ",".join([filename for filename in glob.iglob(os.path.join(cache_dir, ".ivy2", "**", "*.jar"), recursive=True)])
 
     cmd = ["spark-submit",
+           "--executor-memory=3g",
            "--master",
            host_name,
            "--jars"] + [cache] + [

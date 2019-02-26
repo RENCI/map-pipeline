@@ -37,7 +37,22 @@ object Transform2 {
         import spark.implicits._
 
         val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Key")
-        var data = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.dataInputFile).filter($"redcap_repeat_instrument".isNull && $"redcap_repeat_instance".isNull)
+
+        val filterProposal = udf(
+          (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
+            (title == null || !title.contains(' ')) ||
+              ((pi_firstname != null && !NameParser.isWellFormedFirstName(pi_firstname.head +: pi_firstname.tail.toLowerCase)) &&
+                (pi_lastname != null && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase)))
+        )
+
+        var data = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.dataInputFile)
+          .filter($"redcap_repeat_instrument".isNull && $"redcap_repeat_instance".isNull)
+
+        var negdata = data.filter(filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
+        writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
+
+        data = data.filter(!filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
+
 
         val pkMap = mapping
           .filter($"Key".like("%primary%"))
@@ -83,7 +98,7 @@ object Transform2 {
 
 
 
-        val mappingCols = mapping.distinct.select("Fieldname_phase1").map(x => fields(DSLParser(x.getString(0)))).collect().toSeq.flatten
+        val mappingCols = mapping.select("Fieldname_phase1").distinct.map(x => fields(DSLParser(x.getString(0)))).collect().toSeq.flatten
         val unknown = dataCols2.diff(mappingCols).toDF("column")
         val missing = mappingCols.diff(dataCols2).toDF("colums")
 
@@ -106,6 +121,7 @@ object Transform2 {
               case (ast, col2) =>
                 data = data.withColumn(col2, eval(data, col2, ast))
             }
+            println("select columns " + as)
             val df2 = data.select(cols2.map({case (_, col2) => data.col(col2)}) : _*).distinct.withColumn(col, monotonicallyIncreasingId)
             data = data.join(df2, cols2.map({case (_, col2) => col2}), "left")
             cols2.foreach {
@@ -114,7 +130,7 @@ object Transform2 {
             }
         }
 
-        data.cache()
+        // data.cache()
 
         val containsColumnToCopy = udf((fieldName_phase1 : String) => fields(DSLParser(fieldName_phase1)).intersect(columnsToCopy).nonEmpty)
 
@@ -201,8 +217,6 @@ object Transform2 {
               val pks = pkMap(table).filter(x => x._1 != "n/a")
               val df = extractColumnToUnpivotTable(pks, column2, columnsToUnpivot)
               val df2 = df.join(tableMap(table), pks.map(_._2))
-              println(tableMap(table).head())
-              println(df.head())
               println("joining " + tableMap(table).count() + " rows to " + df.count() + " rows on " + pks + ". The result has " + df2.count() + " rows ")
               tableMap(table) = df2
             }

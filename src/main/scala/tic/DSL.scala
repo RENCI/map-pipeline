@@ -106,8 +106,40 @@ object DSL {
           case Success(result, _) => result
           case failure: NoSuccess =>
             println("error parsing pi name " + input + ", " + failure.msg)
-            Seq(null, input)
+            def parse2(input2: String) =
+              parseAll(pi_name, input2) match {
+                case Success(result, _) => result
+                case failure: NoSuccess =>
+                  println("error parsing pi name for special cases " + input + ", " + failure.msg)
+                  Seq(null, input)
+              }
+
+            if (input.contains('-')) {
+              parse2(input.split("-")(1).trim)
+                
+            } else if (input.contains(',')) {
+              parse2(input.split(",")(0).trim)
+            } else if (input.contains('/')) {
+              parse2(input.split("/")(0).trim)
+            } else if (input.contains("for")) {
+              parse2(input.split("for")(0).trim)
+            } else {
+              println("cannot parsing pi name for special cases " + input + ", " + failure.msg)
+              Seq(null, input)
+            }
         }
+      }
+
+    def isWellFormedFirstName(input: String) : Boolean =
+      parseAll(first_name, input) match {
+        case Success(result, _) => true
+        case failure: NoSuccess => false
+      }
+
+    def isWellFormedLastName(input: String) : Boolean =
+      parseAll(last_name, input) match {
+        case Success(result, _) => true
+        case failure: NoSuccess => false
       }
 
   }
