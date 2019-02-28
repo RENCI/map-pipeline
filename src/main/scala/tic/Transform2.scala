@@ -8,10 +8,13 @@ import org.apache.spark.sql._
 import java.util.Properties
 import scala.collection.mutable.Map
 import tic.DSL._
+import tic.GetData.getData
 
 case class Config2(
   mappingInputFile:String = "",
   dataInputFile:String="",
+  dataDictInputFile:String="",
+  redcapApplicationToken:Option[String]=None,
   outputDir:String=""
 )
 
@@ -20,11 +23,11 @@ object Transform2 {
   val parser = new OptionParser[Config2]("Transform") {
     head("Transform", "0.2.0")
     opt[String]("mapping_input_file").required().action((x, c) => c.copy(mappingInputFile = x))
+    opt[String]("redcap_application_token").action((x, c) => c.copy(redcapApplicationToken = Some(x)))
     opt[String]("data_input_file").required().action((x, c) => c.copy(dataInputFile = x))
+    opt[String]("data_dictionary_input_file").required().action((x, c) => c.copy(dataDictInputFile = x))
     opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x))
   }
-
-
 
   def main(args : Array[String]) {
     parser.parse(args, Config2()) match {
@@ -36,17 +39,26 @@ object Transform2 {
 
         import spark.implicits._
 
+        config.redcapApplicationToken match {
+          case None =>
+            Unit
+          case Some(token) =>
+            getData(token, config.dataInputFile)
+        }
+
         val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Key")
+
+        val dataDict = spark.read.format("json").option("multiline", true).load(config.dataDictInputFile)
+        var data = spark.read.format("json").option("multiline", true).load(config.dataInputFile)
 
         val filterProposal = udf(
           (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
-            (title == null || !title.contains(' ')) ||
-              ((pi_firstname != null && !NameParser.isWellFormedFirstName(pi_firstname.head +: pi_firstname.tail.toLowerCase)) &&
-                (pi_lastname != null && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase)))
+            (title == "" || !title.contains(' ')) ||
+              ((pi_firstname != "" && !NameParser.isWellFormedFirstName(pi_firstname.head +: pi_firstname.tail.toLowerCase)) &&
+                (pi_lastname != "" && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase)))
         )
 
-        var data = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.dataInputFile)
-          .filter($"redcap_repeat_instrument".isNull && $"redcap_repeat_instance".isNull)
+        data = data.filter($"redcap_repeat_instrument" === "" && $"redcap_repeat_instance".isNull)
 
         var negdata = data.filter(filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
@@ -122,7 +134,7 @@ object Transform2 {
                 data = data.withColumn(col2, eval(data, col2, ast))
             }
             println("select columns " + as)
-            val df2 = data.select(cols2.map({case (_, col2) => data.col(col2)}) : _*).distinct.withColumn(col, monotonicallyIncreasingId)
+            val df2 = data.select(cols2.map({case (_, col2) => data.col(col2)}) : _*).distinct.withColumn(col, monotonically_increasing_id)
             data = data.join(df2, cols2.map({case (_, col2) => col2}), "left")
             cols2.foreach {
               case (_, col2) =>
@@ -228,15 +240,53 @@ object Transform2 {
             writeDataframe(hc, file, df, header = true)
         }
 
-        val extendColumnPrefix = "reviewer_name_"
-        val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
-        println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
-        val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
-          val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer".isNotNull).distinct
-          val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
-          reviewers.withColumn("organization", lit(organization))
-        }).reduce(_ union _)
-        writeDataframe(hc, s"${config.outputDir}/reviewer_organization", df, header = true)
+        val file2 = s"${config.outputDir}/tables/reviewer_organization"
+        if (fileExists(hc, file2)) {
+          println(file2 + " exists")
+        } else {
+          val extendColumnPrefix = "reviewer_name_"
+          val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
+          println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
+          val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
+            val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer" =!= "").distinct
+            val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
+            reviewers.withColumn("organization", lit(organization))
+          }).reduce(_ union _)
+          writeDataframe(hc, file2, df, header = true)
+        }
+
+        val file3 = s"${config.outputDir}/tables/name"
+        if (fileExists(hc, file3)) {
+          println(file3 + " exists")
+        } else {
+          val ddrdd = dataDict
+            .join(mapping.withColumnRenamed("Fieldname_phase1", "field_name"), Seq("field_name"))
+            .filter($"select_choices_or_calculations" =!= "")
+            .select("select_choices_or_calculations", "Fieldname_HEAL", "Table_HEAL")
+            .rdd
+            .flatMap(row => {
+              val select_choices_or_calculations = row.getString(0)
+              val field_name = row.getString(1)
+              val table_name = row.getString(2)
+              MetadataParser(select_choices_or_calculations) match {
+                case None => Seq()
+                case Some(cs) =>
+                  cs.map {
+                    case Choice(i, d) =>
+                      Row(table_name, field_name, i, field_name + "___" + i, d)
+                  }
+              }
+            })
+          
+          val df = spark.createDataFrame(ddrdd, StructType(Seq(
+            StructField("table", StringType, true),
+            StructField("column", StringType, true),
+            StructField("index", StringType, true),
+            StructField("id", StringType, true),
+            StructField("description", StringType, true)
+          )))
+          writeDataframe(hc, file3, df, header = true)
+        }
 
         spark.stop()
       case None =>

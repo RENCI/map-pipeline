@@ -146,6 +146,28 @@ object DSL {
 
   val parseName = udf(NameParser.apply _)
 
+
+  case class Choice(index: String, description: String)
+  object MetadataParser extends RegexParsers {
+    def choice : Parser[Choice] = {
+      "[0-9_]+".r ~ (", " ~> "([^|])*".r) ^^ {
+        case a ~ b =>
+          Choice(a, b.trim)
+      }
+    }
+
+    def choices : Parser[Seq[Choice]] = {
+      repsep(choice, "| ")
+    }
+    def apply(input: String): Option[Seq[Choice]] =
+      parseAll(choices, input) match {
+        case Success(result, _) => Some(result)
+        case failure: NoSuccess =>
+          println("error parsing choices " + input + ", " + failure.msg)
+          None
+      }
+  }
+
   object DSLParser extends RegexParsers {
 
     def n_a : Parser[AST] = {
