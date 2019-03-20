@@ -211,34 +211,36 @@ object DSL {
       case Success(result, _) => result
       case failure: NoSuccess => scala.sys.error(failure.msg)
     }
+
+    def eval(df: DataFrame, col: String, ast: AST): Column =
+      ast match {
+        case N_A => scala.sys.error("n/a")
+        case Field(a) => df.col(a)
+        case ExtractFirstName(a) =>
+          parseName(eval(df, col, a)).getItem(0)
+        case ExtractLastName(a) =>
+          parseName(eval(df, col, a)).getItem(1)
+        case Coalesce(a, b) =>
+          when(eval(df, col, a).isNull, eval(df, col, b)).otherwise(eval(df, col, a))
+        case GenerateID(_) =>
+          df.col(col)
+      }
+
+    def fields(ast: AST): Seq[String] =
+      ast match {
+        case N_A => Seq()
+        case Field(a) => Seq(a)
+        case ExtractFirstName(a) =>
+          fields(a)
+        case ExtractLastName(a) =>
+          fields(a)
+        case Coalesce(a, b) =>
+          fields(a).union(fields(b))
+        case GenerateID(as) =>
+          as.map(fields).reduce(_ union _)
+      }
+
   }
 
-  def eval(df: DataFrame, col: String, ast: AST): Column =
-    ast match {
-      case N_A => scala.sys.error("n/a")
-      case Field(a) => df.col(a)
-      case ExtractFirstName(a) =>
-        parseName(eval(df, col, a)).getItem(0)
-      case ExtractLastName(a) =>
-        parseName(eval(df, col, a)).getItem(1)
-      case Coalesce(a, b) =>
-        when(eval(df, col, a).isNull, eval(df, col, b)).otherwise(eval(df, col, a))
-      case GenerateID(_) =>
-        df.col(col)
-    }
-
-  def fields(ast: AST): Seq[String] =
-    ast match {
-      case N_A => Seq()
-      case Field(a) => Seq(a)
-      case ExtractFirstName(a) =>
-        fields(a)
-      case ExtractLastName(a) =>
-        fields(a)
-      case Coalesce(a, b) =>
-        fields(a).union(fields(b))
-      case GenerateID(as) =>
-        as.map(fields).reduce(_ union _)
-    }
 }
 

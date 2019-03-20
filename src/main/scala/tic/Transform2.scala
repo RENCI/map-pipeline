@@ -110,7 +110,7 @@ object Transform2 {
 
 
 
-        val mappingCols = mapping.select("Fieldname_phase1").distinct.map(x => fields(DSLParser(x.getString(0)))).collect().toSeq.flatten
+        val mappingCols = mapping.select("Fieldname_phase1").distinct.map(x => DSLParser.fields(DSLParser(x.getString(0)))).collect().toSeq.flatten
         val unknown = dataCols2.diff(mappingCols).toDF("column")
         val missing = mappingCols.diff(dataCols2).toDF("colums")
 
@@ -131,7 +131,7 @@ object Transform2 {
             val cols2 = as.zip((0 until as.size).map("col" + _))
             cols2.foreach {
               case (ast, col2) =>
-                data = data.withColumn(col2, eval(data, col2, ast))
+                data = data.withColumn(col2, DSLParser.eval(data, col2, ast))
             }
             println("select columns " + as)
             val df2 = data.select(cols2.map({case (_, col2) => data.col(col2)}) : _*).distinct.withColumn(col, monotonically_increasing_id)
@@ -144,7 +144,7 @@ object Transform2 {
 
         // data.cache()
 
-        val containsColumnToCopy = udf((fieldName_phase1 : String) => fields(DSLParser(fieldName_phase1)).intersect(columnsToCopy).nonEmpty)
+        val containsColumnToCopy = udf((fieldName_phase1 : String) => DSLParser.fields(DSLParser(fieldName_phase1)).intersect(columnsToCopy).nonEmpty)
 
         // columns to copy
         val columnToCopyTables = mapping
@@ -176,7 +176,7 @@ object Transform2 {
         def extractColumnToCopyTable(columns: Seq[(String, String)]) =
           data.select( columns.map {
             case (fieldname_phase1, fieldname_HEAL) =>
-              eval(data, fieldname_HEAL, DSLParser(fieldname_phase1)).as(fieldname_HEAL)
+              DSLParser.eval(data, fieldname_HEAL, DSLParser(fieldname_phase1)).as(fieldname_HEAL)
           } : _*).distinct()
 
         def extractColumnToUnpivotTable(primaryKeys: Seq[(String,String)], column2: String, unpivots: Seq[String]) = {
@@ -259,32 +259,43 @@ object Transform2 {
         if (fileExists(hc, file3)) {
           println(file3 + " exists")
         } else {
+          val func1 = udf((x : String) => DSLParser.fields(DSLParser(x)) match {
+            case Nil => null
+            case a :: _ => a
+          })
           val ddrdd = dataDict
-            .join(mapping.withColumnRenamed("Fieldname_phase1", "field_name"), Seq("field_name"))
+            .join(mapping
+              .withColumn("field_name", func1($"Fieldname_phase1"))
+              , Seq("field_name"))
             .filter($"select_choices_or_calculations" =!= "")
-            .select("select_choices_or_calculations", "Fieldname_HEAL", "Table_HEAL")
+            .select("field_name", "select_choices_or_calculations", "Fieldname_HEAL", "Table_HEAL")
             .rdd
             .flatMap(row => {
-              val select_choices_or_calculations = row.getString(0)
-              val field_name = row.getString(1)
-              val table_name = row.getString(2)
+              val field_name = row.getString(0)
+              val select_choices_or_calculations = row.getString(1)
+              val field_name_HEAL = row.getString(2)
+              val table_name = row.getString(3)
               MetadataParser(select_choices_or_calculations) match {
                 case None => Seq()
                 case Some(cs) =>
                   cs.map {
                     case Choice(i, d) =>
-                      Row(table_name, field_name, i, field_name + "___" + i, d)
+                      Row(field_name, table_name, field_name_HEAL, i, d)
                   }
               }
             })
-          
+
+          val ctsa = dataDict
+            .filter($"field_name".rlike("^ctsa_[0-9]*$"))
+            .select(lit("org_name").as("field_name"), lit("Submitter").as("table"), lit("submitterInstitution").as("column"), $"field_name".substr(lit(6), length($"field_name")).as("index"), $"field_label".as("description"))
+
           val df = spark.createDataFrame(ddrdd, StructType(Seq(
+            StructField("field_name", StringType, true),
             StructField("table", StringType, true),
             StructField("column", StringType, true),
             StructField("index", StringType, true),
-            StructField("id", StringType, true),
             StructField("description", StringType, true)
-          )))
+          ))).union(ctsa).withColumn("id", concat($"field_name", lit("___"), $"index")).drop("field_name")
           writeDataframe(hc, file3, df, header = true)
         }
 
