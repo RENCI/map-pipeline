@@ -58,6 +58,25 @@ object Transform2 {
                 (pi_lastname != "" && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase)))
         )
 
+        val dataCols = data.columns.toSeq
+        // val dataColsExceptProposalID = dataCols.filter(x => x != "proposal_id")
+        // val dataColsExceptKnownRepeatedFields = dataCols.filter(x => !Seq("proposal_id", "redcap_repeat_instrument", "redcap_repeat_instance").contains(x))
+        // var i = 0
+        // val n = dataColsExceptKnownRepeatedFields.size
+        // val redundantData = dataColsExceptKnownRepeatedFields.flatMap(x => {
+        //   println("looking for repeat data in " + x + " " + i + "/" + n)
+        //   i += 1
+        //   val dataValueCountByProposalID = data.select("proposal_id", x).filter(col(x) !== "").groupBy("proposal_id").agg(collect_set(col(x)).as(x + "_set"))
+        //   val y = dataValueCountByProposalID.filter(size(col(x + "_set")) > 1).map(r => (r.getString(0),r.getSeq[String](1))).collect
+        //   println(y.mkString("\n"))
+        //   if(y.nonEmpty) {
+        //     Seq(y.map(y => (x, y._1, y._2)))
+        //   } else {
+        //     Seq()
+        //   }
+        // }).toDF("proposal_id", "column", "value")
+        // writeDataframe(hc, config.outputDir + "/redundant", redundantData, header = true)
+
         data = data.filter($"redcap_repeat_instrument" === "" && $"redcap_repeat_instance".isNull)
 
         var negdata = data.filter(filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
@@ -93,7 +112,6 @@ object Transform2 {
           }
 
 
-        val dataCols = data.columns.toSeq
         val columnsToCopy = dataCols.flatMap(copyFilter)
         val unpivotMap = dataCols.flatMap(unpivotFilter)
         val columnsToUnpivot = unpivotMap.map(_._2)

@@ -221,7 +221,7 @@ object DSL {
         case ExtractLastName(a) =>
           parseName(eval(df, col, a)).getItem(1)
         case Coalesce(a, b) =>
-          when(eval(df, col, a).isNull, eval(df, col, b)).otherwise(eval(df, col, a))
+          when(eval(df, col, a).isNull || eval(df, col, a) === lit(""), eval(df, col, b)).otherwise(eval(df, col, a))
         case GenerateID(_) =>
           df.col(col)
       }
