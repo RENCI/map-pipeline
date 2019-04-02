@@ -7,6 +7,8 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql._
 import java.util.Properties
 import scala.collection.mutable.Map
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 import tic.DSL._
 import tic.GetData.getData
 import tic.GetDataDict.getDataDict
@@ -40,7 +42,15 @@ object Transform2 {
 
         import spark.implicits._
 
-        def func() = {
+        (config.redcapApplicationToken match {
+          case None =>
+            Future(Unit)
+          case Some(token) =>
+            getData(token, config.dataInputFile).flatMap(_ => {
+              Thread.sleep(1000)
+              getDataDict(token, config.dataDictInputFile)
+            })
+        }).foreach(_ => {
           val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
 
           val dataDict = spark.read.format("json").option("multiline", true).load(config.dataDictInputFile)
@@ -313,18 +323,7 @@ object Transform2 {
           }
 
           spark.stop()
-
-        }
-        config.redcapApplicationToken match {
-          case None =>
-            func()
-          case Some(token) =>
-            getData(token, config.dataInputFile, () => {
-              Thread.sleep(1000)
-              getDataDict(token, config.dataDictInputFile, func)
-            })
-        }
-
+        })
       case None =>
     }
 

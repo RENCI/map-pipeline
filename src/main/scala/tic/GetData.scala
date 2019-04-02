@@ -2,10 +2,11 @@ package tic
 import dispatch._, Defaults._
 import java.io.{File, PrintWriter}
 import scala.util.{Success, Failure}
+import scala.concurrent.Future
 
 object GetData
 {
-  def getData(token: String, output_file: String, func: () => Unit) : Unit = {
+  def getData(token: String, output_file: String) : Future[Unit] = {
     val myRequest = host("redcap.vanderbilt.edu").secure / "api" / ""
     def myPostWithParams = myRequest.POST << Map(
       "token" -> token,
@@ -28,23 +29,17 @@ object GetData
     // val w = new PrintWriter()
     println(myPostWithParams.toRequest)
     val client = Http.default
-    client(myPostWithParams > as.File(new File(output_file))) onComplete {
+    client(myPostWithParams > as.File(new File(output_file))).map(
       x => {
-        x match {
-         case Success(w) =>
-          println(w)
-         case Failure(e) =>
-          println(e)
-        }
+        print(x)
         client.shutdown()
-        func()
       }
-    }
+    )
         // w.close()
 
   }
 
   def main(argv: Array[String]) = {
-    getData(argv(0), argv(1), ()=>{})
+    getData(argv(0), argv(1)).foreach(_ => {})
   }
 }
