@@ -46,7 +46,7 @@ object Transform2 {
             getData(token, config.dataInputFile)
         }
 
-        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Key")
+        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
 
         val dataDict = spark.read.format("json").option("multiline", true).load(config.dataDictInputFile)
         var data = spark.read.format("json").option("multiline", true).load(config.dataInputFile)
@@ -86,7 +86,7 @@ object Transform2 {
 
 
         val pkMap = mapping
-          .filter($"Key".like("%primary%"))
+          .filter($"Primary" === "yes")
           .groupBy("Table_HEAL")
           .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL")).as("primaryKeys"))
           .map(r => (r.getString(0), r.getSeq[Row](1).map(x => (x.getString(0), x.getString(1)))))
