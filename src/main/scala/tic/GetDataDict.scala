@@ -5,7 +5,7 @@ import scala.util.{Success, Failure}
 
 object GetDataDict
 {
-  def getDataDict(token: String, output_file: String) : Unit = {
+  def getDataDict(token: String, output_file: String, func: () => Unit) : Unit = {
     val myRequest = host("redcap.vanderbilt.edu").secure / "api" / ""
     def myPostWithParams = myRequest.POST << Map(
       "token" -> token,
@@ -21,14 +21,20 @@ object GetDataDict
     val client = Http.default
     client(myPostWithParams > as.File(new File(output_file))) onComplete {
       x => {
-        println(x)
+        x match {
+          case Success(w) =>
+            println(w)
+          case Failure(e) =>
+            println(e)
+        }
         client.shutdown()
+        func()
       }
     }
 
   }
 
   def main(argv: Array[String]) = {
-    getDataDict(argv(0), argv(1))
+    getDataDict(argv(0), argv(1), ()=>{})
   }
 }

@@ -5,7 +5,7 @@ import scala.util.{Success, Failure}
 
 object GetData
 {
-  def getData(token: String, output_file: String) : Unit = {
+  def getData(token: String, output_file: String, func: () => Unit) : Unit = {
     val myRequest = host("redcap.vanderbilt.edu").secure / "api" / ""
     def myPostWithParams = myRequest.POST << Map(
       "token" -> token,
@@ -30,8 +30,14 @@ object GetData
     val client = Http.default
     client(myPostWithParams > as.File(new File(output_file))) onComplete {
       x => {
-        println(x)
+        x match {
+         case Success(w) =>
+          println(w)
+         case Failure(e) =>
+          println(e)
+        }
         client.shutdown()
+        func()
       }
     }
         // w.close()
@@ -39,6 +45,6 @@ object GetData
   }
 
   def main(argv: Array[String]) = {
-    getData(argv(0), argv(1))
+    getData(argv(0), argv(1), ()=>{})
   }
 }
