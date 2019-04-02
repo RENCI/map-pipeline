@@ -31,7 +31,7 @@ object GetData
     val client = Http.default
     client(myPostWithParams > as.File(new File(output_file))).map(
       x => {
-        print(x)
+        println(x)
         client.shutdown()
       }
     )

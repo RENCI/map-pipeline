@@ -30,6 +30,6 @@ object GetDataDict
   }
 
   def main(argv: Array[String]) = {
-    getDataDict(argv(0), argv(1)).foreach(_ => Unit)
+    getDataDict(argv(0), argv(1)).foreach(_ => {})
   }
 }

@@ -8,6 +8,8 @@ import org.apache.spark.sql._
 import java.util.Properties
 import scala.collection.mutable.Map
 import scala.concurrent.Future
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import tic.DSL._
 import tic.GetData.getData
@@ -42,15 +44,17 @@ object Transform2 {
 
         import spark.implicits._
 
-        (config.redcapApplicationToken match {
+        Await.ready((config.redcapApplicationToken match {
           case None =>
             Future(Unit)
           case Some(token) =>
-            getData(token, config.dataInputFile).flatMap(_ => {
+            println("load data")
+            getData(token, config.dataInputFile).map(_ => {
+              println("load data dict")
               Thread.sleep(1000)
-              getDataDict(token, config.dataDictInputFile)
+              getDataDict(token, config.dataDictInputFile).map(_=>{})
             })
-        }).foreach(_ => {
+        }).map(_ => {
           val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
 
           val dataDict = spark.read.format("json").option("multiline", true).load(config.dataDictInputFile)
@@ -323,7 +327,7 @@ object Transform2 {
           }
 
           spark.stop()
-        })
+        }), Duration.Inf)
       case None =>
     }
 
