@@ -1,9 +1,14 @@
 # pipeline
 
+### install sbt
+
+https://www.scala-sbt.org/download.html
+
 ### compile code
 ```
 sbt assembly
 ```
+the jar file is at `target/scala-2.11/TIC preprocessing-assembly-1.0.jar`
 
 ### process data
 
