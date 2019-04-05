@@ -8,7 +8,7 @@ https://www.scala-sbt.org/download.html
 ```
 sbt assembly
 ```
-the jar file is at `target/scala-2.11/TIC preprocessing-assembly-1.0.jar`
+the jar file is at `target/scala-2.11/TIC preprocessing-assembly-0.1.0.jar`
 
 ### process data
 
