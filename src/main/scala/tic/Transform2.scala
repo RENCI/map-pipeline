@@ -44,8 +44,8 @@ object Transform2 {
 
         val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
 
-        val dataDict = spark.read.format("json").option("multiline", true).load(config.dataDictInputFile)
-        var data = spark.read.format("json").option("multiline", true).load(config.dataInputFile)
+        val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
+        var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataInputFile)
 
         val filterProposal = udf(
           (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
