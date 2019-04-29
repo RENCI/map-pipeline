@@ -45,7 +45,10 @@ object Transform2 {
         val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
+        println("reading data")
         var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataInputFile)
+        println(data.count + " rows read")
+
 
         val filterProposal = udf(
           (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
@@ -73,12 +76,16 @@ object Transform2 {
         // }).toDF("proposal_id", "column", "value")
         // writeDataframe(hc, config.outputDir + "/redundant", redundantData, header = true)
 
-        data = data.filter($"redcap_repeat_instrument" === "" && $"redcap_repeat_instance".isNull)
+        println("filtering data")
+        data = data.filter($"redcap_repeat_instrument" === "" && $"redcap_repeat_instance" === "")
+        println(data.count + " rows remaining")
 
         var negdata = data.filter(filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
 
+        println("filtering data 2")
         data = data.filter(!filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
+        println(data.count + " rows remaining")
 
 
         val pkMap = mapping
@@ -154,6 +161,7 @@ object Transform2 {
               case (_, col2) =>
                 data = data.drop(col2)
             }
+            println(data.count + " rows remaining")
         }
 
         // data.cache()
@@ -228,6 +236,7 @@ object Transform2 {
               println("processing column to copy table " + table)
               println("copy columns " + columnsToCopy.mkString("[", ",", "]"))
               val df = extractColumnToCopyTable(columnsToCopy)
+              println(df.count + " rows copied")
               tableMap(table) = df
             }
         }
