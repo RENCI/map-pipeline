@@ -295,7 +295,6 @@ object Transform2 {
           println(file2 + " exists")
         } else {
           val extendColumnPrefix = "reviewer_name_"
-          println(dataCols)
           val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
           println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
           val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
