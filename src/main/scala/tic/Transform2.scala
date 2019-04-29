@@ -20,7 +20,7 @@ case class Config2(
   dataInputFile:String="",
   dataDictInputFile:String="",
   outputDir:String="",
-  verbose:Bool=true
+  verbose:Boolean=false
 )
 
 object Transform2 {
