@@ -47,9 +47,10 @@ object Transform2 {
         val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
-        if(config.verbose) println("reading data")
+        println("reading data")
         var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataInputFile)
-        if(config.verbose) println(data.count + " rows read")
+        if(config.verbose)
+          println(data.count + " rows read")
 
 
         val filterProposal = udf(
@@ -78,16 +79,18 @@ object Transform2 {
         // }).toDF("proposal_id", "column", "value")
         // writeDataframe(hc, config.outputDir + "/redundant", redundantData, header = true)
 
-        if(config.verbose) println("filtering data")
+        println("filtering data")
         data = data.filter($"redcap_repeat_instrument" === "" && ($"redcap_repeat_instance".isNull || $"redcap_repeat_instance" === ""))
-        if(config.verbose) println(data.count + " rows remaining")
+        if(config.verbose)
+          println(data.count + " rows remaining")
 
         var negdata = data.filter(filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
 
-        if(config.verbose) println("filtering data 2")
+        println("filtering data 2")
         data = data.filter(!filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
-        if(config.verbose) println(data.count + " rows remaining")
+        if(config.verbose)
+          println(data.count + " rows remaining")
 
 
         val pkMap = mapping
@@ -163,7 +166,8 @@ object Transform2 {
               case (_, col2) =>
                 data = data.drop(col2)
             }
-            println(data.count + " rows remaining")
+            if(config.verbose)
+              println(data.count + " rows remaining")
         }
 
         // data.cache()
@@ -238,7 +242,8 @@ object Transform2 {
               println("processing column to copy table " + table)
               println("copy columns " + columnsToCopy.mkString("[", ",", "]"))
               val df = extractColumnToCopyTable(columnsToCopy)
-              if(config.verbose) println(df.count + " rows copied")
+              if(config.verbose)
+                println(df.count + " rows copied")
               tableMap(table) = df
             }
         }
@@ -254,7 +259,8 @@ object Transform2 {
               val pks = pkMap(table).filter(x => x._1 != "n/a")
               val df = extractColumnToUnpivotTable(pks, column2, columnsToUnpivot)
               val df2 = df.join(tableMap(table), pks.map(_._2))
-              if(config.verbose) println("joining " + tableMap(table).count() + " rows to " + df.count() + " rows on " + pks + ". The result has " + df2.count() + " rows ")
+              if(config.verbose)
+                println("joining " + tableMap(table).count() + " rows to " + df.count() + " rows on " + pks + ". The result has " + df2.count() + " rows ")
               tableMap(table) = df2
             }
         }
