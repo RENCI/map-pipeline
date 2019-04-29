@@ -34,6 +34,15 @@ object Transform2 {
     opt[Unit]("verbose").action((_, c) => c.copy(verbose = true))
   }
 
+  def convertType(col : String, fieldType : String, data : DataFrame) : DataFrame =
+    data.withColumn("tmp", data.col(col).cast( fieldType match {
+      case "boolean" => BooleanType
+      case "int" => IntegerType
+      case "date" => DateType
+      case "text" => StringType
+      case _ => throw new RuntimeException("unsupported type " + fieldType)
+    })).drop(col).withColumnRenamed("tmp", col)
+
   def main(args : Array[String]) {
     parser.parse(args, Config2()) match {
       case Some(config) =>
@@ -45,13 +54,23 @@ object Transform2 {
         import spark.implicits._
 
         val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
+        val datatypes = ("redcap_repeat_instrument", "text") +: ("redcap_repeat_instance", "int") +: mapping.select("Fieldname_phase1", "Data Type").filter($"Fieldname_phase1" =!= "n/a").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
+
+        // val schema = StructType(datatypes.flatMap(x => {
+        //     val x1 = x._1
+        //     val x12 = DSLParser(x1)
+        //     x12 match {
+        //       case Field(_) =>
+        //         Some(StructField(x1, StringType, true))
+        //       case _ => None
+        //     }
+        // }))
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
         println("reading data")
-        var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataInputFile)
+        var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").option("inferSchema", false).load(config.dataInputFile)
         if(config.verbose)
           println(data.count + " rows read")
-
 
         val filterProposal = udf(
           (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
@@ -61,6 +80,13 @@ object Transform2 {
         )
 
         val dataCols = data.columns.toSeq
+        for(datatype <- datatypes) {
+          val col = datatype._1
+          val colType = datatype._2
+          if (dataCols.contains(col))
+            data = convertType(col, colType, data)
+        }
+
         // val dataColsExceptProposalID = dataCols.filter(x => x != "proposal_id")
         // val dataColsExceptKnownRepeatedFields = dataCols.filter(x => !Seq("proposal_id", "redcap_repeat_instrument", "redcap_repeat_instance").contains(x))
         // var i = 0
@@ -80,7 +106,7 @@ object Transform2 {
         // writeDataframe(hc, config.outputDir + "/redundant", redundantData, header = true)
 
         println("filtering data")
-        data = data.filter($"redcap_repeat_instrument" === "" && ($"redcap_repeat_instance".isNull || $"redcap_repeat_instance" === ""))
+        data = data.filter($"redcap_repeat_instrument" === "" && $"redcap_repeat_instance".isNull)
         if(config.verbose)
           println(data.count + " rows remaining")
 
@@ -126,13 +152,6 @@ object Transform2 {
 
         val dataCols2 = columnsToCopy ++ columnsToUnpivot
 
-        val datatypes = mapping.select("Fieldname_phase1", "Data Type").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
-        datatypes.filter(x => x._2 == "boolean").map(_._1).foreach {
-          col =>
-            if (dataCols.contains(col)) {
-              data = data.withColumn("tmp", data.col(col).cast(BooleanType)).drop(col).withColumnRenamed("tmp", col)
-            }
-        }
 
 
 
@@ -276,6 +295,7 @@ object Transform2 {
           println(file2 + " exists")
         } else {
           val extendColumnPrefix = "reviewer_name_"
+          println(dataCols)
           val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
           println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
           val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
