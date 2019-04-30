@@ -34,22 +34,25 @@ object Transform2 {
     opt[Unit]("verbose").action((_, c) => c.copy(verbose = true))
   }
 
-  def convertType(col : String, fieldType : String, data : DataFrame) : DataFrame =
-    data.withColumn("tmp", data.col(col).cast( fieldType match {
+  def convert(fieldType: String) : DataType =
+    fieldType match {
       case "boolean" => BooleanType
       case "int" => IntegerType
       case "date" => DateType
       case "text" => StringType
       case _ => throw new RuntimeException("unsupported type " + fieldType)
-    })).drop(col).withColumnRenamed("tmp", col)
+    }
 
-  def primaryKeyMap(spark : SparkSession, mapping : DataFrame) : scala.collection.immutable.Map[String, Seq[(String, String)]] = {
+  def convertType(col : String, fieldType : String, data : DataFrame) : DataFrame =
+    data.withColumn("tmp", data.col(col).cast( convert(fieldType))).drop(col).withColumnRenamed("tmp", col)
+
+  def primaryKeyMap(spark : SparkSession, mapping : DataFrame) : scala.collection.immutable.Map[String, Seq[(String, String, String)]] = {
     import spark.implicits._
     val pkMap = mapping
       .filter($"Primary" === "yes")
       .groupBy("Table_HEAL")
-      .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL")).as("primaryKeys"))
-      .map(r => (r.getString(0), r.getSeq[Row](1).map(x => (x.getString(0), x.getString(1)))))
+      .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL", "Data Type")).as("primaryKeys"))
+      .map(r => (r.getString(0), r.getSeq[Row](1).map(x => (x.getString(0), x.getString(1), x.getString(2)))))
       .collect()
       .toMap
 
@@ -224,12 +227,12 @@ object Transform2 {
     val columnToUnpivotTables = unpivotMap.toDF("column", "Fieldname_phase1")
       .join(mapping, "Fieldname_phase1")
       .filter($"Table_HEAL".isNotNull)
-      .groupBy("Table_HEAL", "Fieldname_HEAL")
+      .groupBy("Table_HEAL", "Fieldname_HEAL", "Data Type")
       .agg(collect_list("column").as("columns"))
 
     println("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect().mkString(","))
 
-    val columnToUnpivotTablesMap = columnToUnpivotTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_HEAL")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq())))
+    val columnToUnpivotTablesMap = columnToUnpivotTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_HEAL")), r.getString(r.fieldIndex("Data Type")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq())))
 
     val columnToUnpivotToSeparateTableTables = columnToUnpivotTables.groupBy("Table_HEAL").agg(count("Fieldname_HEAL").as("count"))
       .filter($"count" > 1).select("Table_HEAL").map(r => r.getString(0)).collect()
@@ -238,7 +241,7 @@ object Transform2 {
 
     assert(columnToUnpivotToSeparateTableTables.isEmpty)
 
-    def extractColumnToUnpivotTable(primaryKeys: Seq[(String,String)], column2: String, unpivots: Seq[String]) = {
+    def extractColumnToUnpivotTable(primaryKeys: Seq[(String,String,String)], column2: String, column2Type: String, unpivots: Seq[String]) = {
       val df = data.select((primaryKeys.map(_._1) ++ unpivots).map(data.col _) : _*).distinct()
       println("processing unpivot " + column2 + " from " + unpivots.mkString("[",",","]"))
 
@@ -248,7 +251,10 @@ object Transform2 {
         }.map(_._1)
 
       val schema = StructType(
-        primaryKeys.map(_._2).map(prikey => StructField(prikey, StringType, true)) :+ StructField(column2, StringType, true))
+        primaryKeys.map{
+          case (_, prikeyHeal, dataType) => StructField(prikeyHeal, convert(dataType), true)
+        } :+ StructField(column2, convert(column2Type), true)
+      )
 
       spark.createDataFrame(df.rdd.flatMap(r => {
         val prikeyvals = primaryKeys.map(_._1).map(prikey => r.get(r.fieldIndex(prikey)))
@@ -263,12 +269,12 @@ object Transform2 {
     }
 
     columnToUnpivotTablesMap.foreach {
-      case (table, column2, columnsToUnpivot) =>
+      case (table, column2, column2Type, columnsToUnpivot) =>
         val file = s"${config.outputDir}/tables/${table}"
         println("processing column to unpivot table " + table + ", column " + column2)
         println("unpivoting columns " + columnsToUnpivot.mkString("[", ",", "]"))
         val pks = pkMap(table).filter(x => x._1 != "n/a")
-        val df = extractColumnToUnpivotTable(pks, column2, columnsToUnpivot)
+        val df = extractColumnToUnpivotTable(pks, column2, column2Type, columnsToUnpivot)
         val df2 = df.join(tableMap(table), pks.map(_._2))
         if(config.verbose)
           println("joining " + tableMap(table).count() + " rows to " + df.count() + " rows on " + pks + ". The result has " + df2.count() + " rows ")
