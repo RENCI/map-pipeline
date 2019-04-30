@@ -14,8 +14,6 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import tic.DSL._
 import tic.GetData.getData
 import tic.GetDataDict.getDataDict
-import org.apache.log4j.Logger; 
-import org.apache.log4j.Level;
 
 case class Config2(
   mappingInputFile:String = "",
@@ -184,7 +182,7 @@ object Transform2 {
       .groupBy("Table_HEAL")
       .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL")).as("columns"))
 
-    println("copy " + columnToCopyTables.select("Table_HEAL").collect())
+    println("copy " + columnToCopyTables.select("Table_HEAL").collect().mkString(","))
     val columnToCopyTablesMap = columnToCopyTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), Option(r.getSeq[Row](r.fieldIndex("columns")).map(x => (x.getString(0), x.getString(1)))).getOrElse(Seq())))
 
     def extractColumnToCopyTable(columns: Seq[(String, String)]) =
@@ -206,8 +204,9 @@ object Transform2 {
 
   }
 
-  def collect(spark: SparkSession, config: Config2, pkMap : scala.collection.immutable.Map[String, Seq[(String, String)]], tableMap : Map[String, DataFrame], mapping : DataFrame, data : DataFrame):Seq[String] = {
+  def collect(spark: SparkSession, config: Config2, tableMap : Map[String, DataFrame], mapping : DataFrame, data : DataFrame):Seq[String] = {
     import spark.implicits._
+    val pkMap = primaryKeyMap(spark, mapping)
     val dataCols = data.columns.toSeq
     def unpivotFilter(s:String) : Option[(String, String)] =
       s.indexOf("___") match {
@@ -228,7 +227,7 @@ object Transform2 {
       .groupBy("Table_HEAL", "Fieldname_HEAL")
       .agg(collect_list("column").as("columns"))
 
-    println("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect())
+    println("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect().mkString(","))
 
     val columnToUnpivotTablesMap = columnToUnpivotTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_HEAL")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq())))
 
@@ -279,9 +278,6 @@ object Transform2 {
   }
 
   def main(args : Array[String]) {
-    Logger.getLogger("org").setLevel(Level.DEBUG); 
-    Logger.getLogger("akka").setLevel(Level.DEBUG);
-
     parser.parse(args, Config2()) match {
       case Some(config) =>
         val spark = SparkSession.builder.appName("Transform").getOrCreate()
@@ -299,13 +295,11 @@ object Transform2 {
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
         val dataCols = data.columns.toSeq
 
-        val pkMap = primaryKeyMap(spark, mapping)
-
         data = generateID(spark, config, mapping, data)
 
         val tableMap = Map[String, DataFrame]()
         val columnsToCopy = copy(spark, config, tableMap, mapping, data)
-        val columnsToUnpivot = collect(spark, config, pkMap, tableMap, mapping, data)
+        val columnsToUnpivot = collect(spark, config, tableMap, mapping, data)
 
         val (unknown, missing) = diff(spark, mapping, columnsToCopy ++ columnsToUnpivot)
         writeDataframe(hc, config.outputDir + "/unknown", unknown)
@@ -320,63 +314,55 @@ object Transform2 {
         }
 
         val file2 = s"${config.outputDir}/tables/reviewer_organization"
-        if (fileExists(hc, file2)) {
-          println(file2 + " exists")
-        } else {
-          val extendColumnPrefix = "reviewer_name_"
-          val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
-          println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
-          val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
-            val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer" =!= "").distinct
-            val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
-            reviewers.withColumn("organization", lit(organization))
-          }).reduce(_ union _)
-          writeDataframe(hc, file2, df, header = true)
-        }
+        val extendColumnPrefix = "reviewer_name_"
+        val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
+        println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
+        val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
+          val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer" =!= "").distinct
+          val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
+          reviewers.withColumn("organization", lit(organization))
+        }).reduce(_ union _)
+        writeDataframe(hc, file2, df, header = true)
 
         val file3 = s"${config.outputDir}/tables/name"
-        if (fileExists(hc, file3)) {
-          println(file3 + " exists")
-        } else {
-          val func1 = udf((x : String) => DSLParser.fields(DSLParser(x)) match {
-            case Nil => null
-            case a :: _ => a
+        val func1 = udf((x : String) => DSLParser.fields(DSLParser(x)) match {
+          case Nil => null
+          case a :: _ => a
+        })
+        val ddrdd = dataDict
+          .join(mapping
+            .withColumn("field_name", func1($"Fieldname_phase1"))
+            , Seq("field_name"))
+          .filter($"select_choices_or_calculations" =!= "")
+          .select("field_name", "select_choices_or_calculations", "Fieldname_HEAL", "Table_HEAL")
+          .rdd
+          .flatMap(row => {
+            val field_name = row.getString(0)
+            val select_choices_or_calculations = row.getString(1)
+            val field_name_HEAL = row.getString(2)
+            val table_name = row.getString(3)
+            MetadataParser(select_choices_or_calculations) match {
+              case None => Seq()
+              case Some(cs) =>
+                cs.map {
+                  case Choice(i, d) =>
+                    Row(field_name, table_name, field_name_HEAL, i, d)
+                }
+            }
           })
-          val ddrdd = dataDict
-            .join(mapping
-              .withColumn("field_name", func1($"Fieldname_phase1"))
-              , Seq("field_name"))
-            .filter($"select_choices_or_calculations" =!= "")
-            .select("field_name", "select_choices_or_calculations", "Fieldname_HEAL", "Table_HEAL")
-            .rdd
-            .flatMap(row => {
-              val field_name = row.getString(0)
-              val select_choices_or_calculations = row.getString(1)
-              val field_name_HEAL = row.getString(2)
-              val table_name = row.getString(3)
-              MetadataParser(select_choices_or_calculations) match {
-                case None => Seq()
-                case Some(cs) =>
-                  cs.map {
-                    case Choice(i, d) =>
-                      Row(field_name, table_name, field_name_HEAL, i, d)
-                  }
-              }
-            })
 
-          val ctsa = dataDict
-            .filter($"field_name".rlike("^ctsa_[0-9]*$"))
-            .select(lit("org_name").as("field_name"), lit("Submitter").as("table"), lit("submitterInstitution").as("column"), $"field_name".substr(lit(6), length($"field_name")).as("index"), $"field_label".as("description"))
+        val ctsa = dataDict
+          .filter($"field_name".rlike("^ctsa_[0-9]*$"))
+          .select(lit("org_name").as("field_name"), lit("Submitter").as("table"), lit("submitterInstitution").as("column"), $"field_name".substr(lit(6), length($"field_name")).as("index"), $"field_label".as("description"))
 
-          val df = spark.createDataFrame(ddrdd, StructType(Seq(
-            StructField("field_name", StringType, true),
-            StructField("table", StringType, true),
-            StructField("column", StringType, true),
-            StructField("index", StringType, true),
-            StructField("description", StringType, true)
-          ))).union(ctsa).withColumn("id", concat($"field_name", lit("___"), $"index")).drop("field_name")
-          writeDataframe(hc, file3, df, header = true)
-        }
+        val df2 = spark.createDataFrame(ddrdd, StructType(Seq(
+          StructField("field_name", StringType, true),
+          StructField("table", StringType, true),
+          StructField("column", StringType, true),
+          StructField("index", StringType, true),
+          StructField("description", StringType, true)
+        ))).union(ctsa).withColumn("id", concat($"field_name", lit("___"), $"index")).drop("field_name")
+        writeDataframe(hc, file3, df2, header = true)
 
         spark.stop()
         
