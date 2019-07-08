@@ -19,6 +19,7 @@ case class Config2(
   mappingInputFile:String = "",
   dataInputFile:String="",
   dataDictInputFile:String="",
+  dataMappingFiles:scala.collection.Map[String,String]=scala.collection.Map(),
   outputDir:String="",
   verbose:Boolean=false
 )
@@ -28,8 +29,9 @@ object Transform2 {
   val parser = new OptionParser[Config2]("Transform") {
     head("Transform", "0.2.0")
     opt[String]("mapping_input_file").required().action((x, c) => c.copy(mappingInputFile = x))
-    opt[String]("data_input_file").required().action((x, c) => c.copy(dataInputFile = x))
+    opt[String]("data_input_file").required().action((x, c) => c.copy(dataDictInputFile = x))
     opt[String]("data_dictionary_input_file").required().action((x, c) => c.copy(dataDictInputFile = x))
+    opt[scala.collection.Map[String,String]]("data_mapping_files").action((x, c) => c.copy(dataMappingFiles = x))
     opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x))
     opt[Unit]("verbose").action((_, c) => c.copy(verbose = true))
   }
@@ -296,8 +298,21 @@ object Transform2 {
         val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
+
+        val dataMappingDfs = config.dataMappingFiles.mapValues((filename) =>
+          spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(filename)
+        )
+
+        spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
+
         val (data0, negdata) = readData(spark, config, mapping)
         var data = data0
+
+        dataMappingDfs.foreach {
+          case (column, df) =>
+            data = data.join(df, data(column) === df(column), "left")
+        }
+
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
         val dataCols = data.columns.toSeq
 
@@ -312,7 +327,6 @@ object Transform2 {
         writeDataframe(hc, config.outputDir + "/missing", missing)
 
         // data.cache()
-
         tableMap.foreach {
           case (table, df) =>
             val file = s"${config.outputDir}/tables/${table}"
