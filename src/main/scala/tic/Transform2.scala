@@ -11,6 +11,7 @@ import scala.concurrent.Future
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
+import java.io.File
 import tic.DSL._
 import tic.GetData.getData
 import tic.GetDataDict.getDataDict
@@ -19,21 +20,25 @@ case class Config2(
   mappingInputFile:String = "",
   dataInputFile:String="",
   dataDictInputFile:String="",
-  dataMappingFiles:scala.collection.Map[String,String]=scala.collection.Map(),
+  auxiliaryDir:String="",
   outputDir:String="",
   verbose:Boolean=false
 )
 
 object Transform2 {
 
-  val parser = new OptionParser[Config2]("Transform") {
-    head("Transform", "0.2.0")
-    opt[String]("mapping_input_file").required().action((x, c) => c.copy(mappingInputFile = x))
-    opt[String]("data_input_file").required().action((x, c) => c.copy(dataDictInputFile = x))
-    opt[String]("data_dictionary_input_file").required().action((x, c) => c.copy(dataDictInputFile = x))
-    opt[scala.collection.Map[String,String]]("data_mapping_files").action((x, c) => c.copy(dataMappingFiles = x))
-    opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x))
-    opt[Unit]("verbose").action((_, c) => c.copy(verbose = true))
+  val builder = OParser.builder[Config2]
+  val parser =  {
+    import builder._
+    OParser.sequence(
+      programName("Transform"),
+      head("Transform", "0.2.2"),
+      opt[String]("mapping_input_file").required().action((x, c) => c.copy(mappingInputFile = x)),
+      opt[String]("data_input_file").required().action((x, c) => c.copy(dataDictInputFile = x)),
+      opt[String]("data_dictionary_input_file").required().action((x, c) => c.copy(dataDictInputFile = x)),
+      opt[String]("auxiliary_dir").action((x, c) => c.copy(auxiliaryDir = x)),
+      opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x)),
+      opt[Unit]("verbose").action((_, c) => c.copy(verbose = true)))
   }
 
   def convert(fieldType: String) : DataType =
@@ -286,7 +291,7 @@ object Transform2 {
   }
 
   def main(args : Array[String]) {
-    parser.parse(args, Config2()) match {
+    OParser.parse(parser, args, Config2()) match {
       case Some(config) =>
         val spark = SparkSession.builder.appName("Transform").getOrCreate()
         spark.sparkContext.setLogLevel("WARN")
@@ -299,8 +304,8 @@ object Transform2 {
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
-        val dataMappingDfs = config.dataMappingFiles.mapValues((filename) =>
-          spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(filename)
+        val dataMappingDfs = new File(config.auxiliaryDir).listFiles.toSeq.map((f) =>
+          spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(f.getAbsolutePath())
         )
 
         spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
@@ -309,7 +314,8 @@ object Transform2 {
         var data = data0
 
         dataMappingDfs.foreach {
-          case (column, df) =>
+          case df =>
+            val column = df.columns.head
             data = data.join(df, data(column) === df(column), "left")
         }
 
