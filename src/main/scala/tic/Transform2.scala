@@ -34,9 +34,9 @@ object Transform2 {
       programName("Transform"),
       head("Transform", "0.2.2"),
       opt[String]("mapping_input_file").required().action((x, c) => c.copy(mappingInputFile = x)),
-      opt[String]("data_input_file").required().action((x, c) => c.copy(dataDictInputFile = x)),
+      opt[String]("data_input_file").required().action((x, c) => c.copy(dataInputFile = x)),
       opt[String]("data_dictionary_input_file").required().action((x, c) => c.copy(dataDictInputFile = x)),
-      opt[String]("auxiliary_dir").action((x, c) => c.copy(auxiliaryDir = x)),
+      opt[String]("auxiliary_dir").required().action((x, c) => c.copy(auxiliaryDir = x)),
       opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x)),
       opt[Unit]("verbose").action((_, c) => c.copy(verbose = true)))
   }
@@ -304,9 +304,10 @@ object Transform2 {
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
-        val dataMappingDfs = new File(config.auxiliaryDir).listFiles.toSeq.map((f) =>
+        val dataMappingDfs = new File(config.auxiliaryDir).listFiles.toSeq.map((f) => {
+          println("loading aux " + f.getAbsolutePath())
           spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(f.getAbsolutePath())
-        )
+        })
 
         spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
@@ -316,7 +317,11 @@ object Transform2 {
         dataMappingDfs.foreach {
           case df =>
             val column = df.columns.head
-            data = data.join(df, data(column) === df(column), "left")
+            println("joining dataframes")
+            println("data: " + data.columns.toSeq)
+            println("aux: " + df.columns.toSeq)
+            println("on " + column)
+            data = data.join(df, Seq(column), "left")
         }
 
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
