@@ -21,9 +21,74 @@ case class Config2(
   dataInputFile:String="",
   dataDictInputFile:String="",
   auxiliaryDir:String="",
+  filterDir:String="",
   outputDir:String="",
   verbose:Boolean=false
 )
+
+object DataFilter {
+  type SourceDataFilter = DataFrame => (DataFrame, Option[DataFrame])
+
+  def comp(a : SourceDataFilter, b : SourceDataFilter) : SourceDataFilter = df => {
+    val (df1, nd1) = a(df)
+    val (df2, nd2) = b(df1)
+    (df2, nd2 match {
+      case None => nd1
+      case _ => nd2
+    })
+  }
+
+  val id : SourceDataFilter = df => (df, None)
+
+  val testDataFilter : Boolean => SourceDataFilter = (verbose: Boolean) => (data : DataFrame) => {
+    println("filtering data 2")
+    val filterProposal = udf(
+      (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
+      (title == "" || !title.contains(' ')) ||
+        ((pi_firstname != "" && !NameParser.isWellFormedFirstName(pi_firstname.head +: pi_firstname.tail.toLowerCase)) &&
+          (pi_lastname != "" && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase)))
+    )
+
+    val f = filterProposal(data.col("proposal_title2"), data.col("short_name"), data.col("pi_firstname"), data.col("pi_lastname"))
+    val negdata = data.filter(f)
+
+    val data2 = data.filter(!f)
+    if(verbose)
+      println(data.count + " rows remaining")
+    (data2, Some(negdata))
+  }
+
+  val filter1 : Boolean => SourceDataFilter = (verbose: Boolean) => (data : DataFrame) => {
+    println("filtering data")
+    val data2 = data.filter(data.col("redcap_repeat_instrument") === "" && data.col("redcap_repeat_instance").isNull)
+    if(verbose)
+      println(data2.count + " rows remaining")
+    (data2, None)
+  }
+
+  val auxDataFilter : (SparkSession, String, String) => SourceDataFilter = (spark, auxiliaryDir, joinType) => (data : DataFrame) => {
+    val dataMappingDfs = new File(auxiliaryDir).listFiles.toSeq.map((f) => {
+      println("loading aux " + f.getAbsolutePath())
+      spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(f.getAbsolutePath())
+    })
+
+    var data2 = data
+    dataMappingDfs.foreach {
+      case df =>
+        val column = df.columns.head
+        println("joining dataframes")
+        println("data: " + data.columns.toSeq)
+        println("aux: " + df.columns.toSeq)
+        println("on " + column)
+        println("join type: " + joinType)
+        data2 = data2.join(df, Seq(column), joinType)
+    }
+    (data2, None)
+  }
+
+}
+
+import DataFilter._
 
 object Transform2 {
 
@@ -37,6 +102,7 @@ object Transform2 {
       opt[String]("data_input_file").required().action((x, c) => c.copy(dataInputFile = x)),
       opt[String]("data_dictionary_input_file").required().action((x, c) => c.copy(dataDictInputFile = x)),
       opt[String]("auxiliary_dir").required().action((x, c) => c.copy(auxiliaryDir = x)),
+      opt[String]("filter_dir").required().action((x, c) => c.copy(filterDir = x)),
       opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x)),
       opt[Unit]("verbose").action((_, c) => c.copy(verbose = true)))
   }
@@ -83,12 +149,6 @@ object Transform2 {
     if(config.verbose)
       println(data.count + " rows read")
 
-    val filterProposal = udf(
-      (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
-      (title == "" || !title.contains(' ')) ||
-        ((pi_firstname != "" && !NameParser.isWellFormedFirstName(pi_firstname.head +: pi_firstname.tail.toLowerCase)) &&
-          (pi_lastname != "" && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase)))
-    )
 
     val datatypes = ("redcap_repeat_instrument", "text") +: ("redcap_repeat_instance", "int") +: mapping.select("Fieldname_phase1", "Data Type").filter($"Fieldname_phase1" =!= "n/a").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
     val dataCols = data.columns.toSeq
@@ -117,18 +177,17 @@ object Transform2 {
     // }).toDF("proposal_id", "column", "value")
     // writeDataframe(hc, config.outputDir + "/redundant", redundantData, header = true)
 
-    println("filtering data")
-    data = data.filter($"redcap_repeat_instrument" === "" && $"redcap_repeat_instance".isNull)
-    if(config.verbose)
-      println(data.count + " rows remaining")
+    val (data2, negdata) =
+      comp(
+        comp(
+          comp(
+            filter1(config.verbose),
+            testDataFilter(config.verbose)
+          ), if(config.auxiliaryDir == "") id else auxDataFilter(spark, config.auxiliaryDir, "left")
+        ), if(config.filterDir == "") id else auxDataFilter(spark, config.filterDir, "inner")
+      )(data)
 
-    val negdata = data.filter(filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
-
-    println("filtering data 2")
-    data = data.filter(!filterProposal($"proposal_title2", $"short_name", $"pi_firstname", $"pi_lastname"))
-    if(config.verbose)
-      println(data.count + " rows remaining")
-    (data, negdata)
+    (data2, negdata.getOrElse(null))
   }
 
   def generateID(spark : SparkSession, config : Config2, mapping : DataFrame, data0 : DataFrame): DataFrame = {
@@ -304,25 +363,10 @@ object Transform2 {
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
-        val dataMappingDfs = new File(config.auxiliaryDir).listFiles.toSeq.map((f) => {
-          println("loading aux " + f.getAbsolutePath())
-          spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(f.getAbsolutePath())
-        })
-
         spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
         val (data0, negdata) = readData(spark, config, mapping)
         var data = data0
-
-        dataMappingDfs.foreach {
-          case df =>
-            val column = df.columns.head
-            println("joining dataframes")
-            println("data: " + data.columns.toSeq)
-            println("aux: " + df.columns.toSeq)
-            println("on " + column)
-            data = data.join(df, Seq(column), "left")
-        }
 
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
         val dataCols = data.columns.toSeq
