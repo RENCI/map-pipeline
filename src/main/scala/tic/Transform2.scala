@@ -293,12 +293,12 @@ object Transform2 {
     val columnToUnpivotTables = unpivotMap.toDF("column", "Fieldname_phase1")
       .join(mapping, "Fieldname_phase1")
       .filter($"Table_HEAL".isNotNull)
-      .groupBy("Table_HEAL", "Fieldname_HEAL", "Data Type")
+      .groupBy("Table_HEAL", "Fieldname_HEAL", "Fieldname_phase1", "Data Type")
       .agg(collect_list("column").as("columns"))
 
     println("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect().mkString(","))
 
-    val columnToUnpivotTablesMap = columnToUnpivotTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_HEAL")), r.getString(r.fieldIndex("Data Type")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq())))
+    val columnToUnpivotTablesMap = columnToUnpivotTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_phase1")), r.getString(r.fieldIndex("Fieldname_HEAL")), r.getString(r.fieldIndex("Data Type")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq())))
 
     val columnToUnpivotToSeparateTableTables = columnToUnpivotTables.groupBy("Table_HEAL").agg(count("Fieldname_HEAL").as("count"))
       .filter($"count" > 1).select("Table_HEAL").map(r => r.getString(0)).collect()
@@ -335,11 +335,11 @@ object Transform2 {
     }
 
     columnToUnpivotTablesMap.foreach {
-      case (table, column2, column2Type, columnsToUnpivot) =>
+      case (table, column0, column2, column2Type, columnsToUnpivot) =>
         val file = s"${config.outputDir}/tables/${table}"
         println("processing column to unpivot table " + table + ", column " + column2)
         println("unpivoting columns " + columnsToUnpivot.mkString("[", ",", "]"))
-        val pks = pkMap(table).filter(x => x._1 != "n/a")
+        val pks = pkMap(table).filter(x => x._1 != "n/a" && x._1 != column0)
         val df = extractColumnToUnpivotTable(pks, column2, column2Type, columnsToUnpivot)
         val df2 = df.join(tableMap(table), pks.map(_._2))
         if(config.verbose)
