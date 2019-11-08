@@ -13,6 +13,8 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import java.io.File
 import java.util.logging.Logger
+import java.util.logging.Level
+import java.util.logging.ConsoleHandler
 import tic.DSL._
 import tic.GetData.getData
 import tic.GetDataDict.getDataDict
@@ -28,10 +30,8 @@ case class Config2(
 )
 
 object DataFilter {
+  import Transform2._
   type SourceDataFilter = DataFrame => (DataFrame, Option[DataFrame])
-
-  val logger = Logger.getLogger()
-  logger.setLevel(Level.CONFIG)
 
   def comp(a : SourceDataFilter, b : SourceDataFilter) : SourceDataFilter = df => {
     val (df1, nd1) = a(df)
@@ -93,12 +93,14 @@ object DataFilter {
 }
 
 import DataFilter._
-
 object Transform2 {
 
-  val logger = Logger.getLogger()
-  logger.setLevel(Level.CONFIG)
+  val logger = Logger.getLogger(this.getClass().getName())
+  logger.setLevel(Level.FINEST)
 
+  val ch = new ConsoleHandler()
+  logger.addHandler(ch)
+  ch.setLevel(Level.FINEST)
   val builder = OParser.builder[Config2]
   val parser =  {
     import builder._
