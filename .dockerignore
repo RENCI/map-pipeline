@@ -1,0 +1,7 @@
+**/*~
+venv
+**/.idea
+**/.ensime
+**/.ensime_cache
+**/__pycache__
+target
