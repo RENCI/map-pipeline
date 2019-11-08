@@ -12,6 +12,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import java.io.File
+import java.util.logging.Logger
 import tic.DSL._
 import tic.GetData.getData
 import tic.GetDataDict.getDataDict
@@ -29,6 +30,9 @@ case class Config2(
 object DataFilter {
   type SourceDataFilter = DataFrame => (DataFrame, Option[DataFrame])
 
+  val logger = Logger.getLogger()
+  logger.setLevel(Level.CONFIG)
+
   def comp(a : SourceDataFilter, b : SourceDataFilter) : SourceDataFilter = df => {
     val (df1, nd1) = a(df)
     val (df2, nd2) = b(df1)
@@ -41,7 +45,7 @@ object DataFilter {
   val id : SourceDataFilter = df => (df, None)
 
   val testDataFilter : Boolean => SourceDataFilter = (verbose: Boolean) => (data : DataFrame) => {
-    println("filtering data 2")
+    logger.info("filtering data 2")
     val filterProposal = udf(
       (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
       (title == "" || !title.contains(' ')) ||
@@ -54,21 +58,21 @@ object DataFilter {
 
     val data2 = data.filter(!f)
     if(verbose)
-      println(data.count + " rows remaining")
+      logger.info(data.count + " rows remaining")
     (data2, Some(negdata))
   }
 
   val filter1 : Boolean => SourceDataFilter = (verbose: Boolean) => (data : DataFrame) => {
-    println("filtering data")
+    logger.info("filtering data")
     val data2 = data.filter(data.col("redcap_repeat_instrument") === "" && data.col("redcap_repeat_instance").isNull)
     if(verbose)
-      println(data2.count + " rows remaining")
+      logger.info(data2.count + " rows remaining")
     (data2, None)
   }
 
   val auxDataFilter : (SparkSession, String, String) => SourceDataFilter = (spark, auxiliaryDir, joinType) => (data : DataFrame) => {
     val dataMappingDfs = new File(auxiliaryDir).listFiles.toSeq.map((f) => {
-      println("loading aux " + f.getAbsolutePath())
+      logger.info("loading aux " + f.getAbsolutePath())
       spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(f.getAbsolutePath())
     })
 
@@ -76,11 +80,11 @@ object DataFilter {
     dataMappingDfs.foreach {
       case df =>
         val column = df.columns.head
-        println("joining dataframes")
-        println("data: " + data.columns.toSeq)
-        println("aux: " + df.columns.toSeq)
-        println("on " + column)
-        println("join type: " + joinType)
+        logger.info("joining dataframes")
+        logger.info("data: " + data.columns.toSeq)
+        logger.info("aux: " + df.columns.toSeq)
+        logger.info("on " + column)
+        logger.info("join type: " + joinType)
         data2 = data2.join(df, Seq(column), joinType)
     }
     (data2, None)
@@ -91,6 +95,9 @@ object DataFilter {
 import DataFilter._
 
 object Transform2 {
+
+  val logger = Logger.getLogger()
+  logger.setLevel(Level.CONFIG)
 
   val builder = OParser.builder[Config2]
   val parser =  {
@@ -129,7 +136,7 @@ object Transform2 {
       .collect()
       .toMap
 
-    println("pkMap = " + pkMap)
+    logger.info("pkMap = " + pkMap)
     pkMap
   }
 
@@ -144,10 +151,10 @@ object Transform2 {
   def readData(spark : SparkSession, config: Config2, mapping: DataFrame): (DataFrame, DataFrame) = {
     import spark.implicits._
     val schema = allStringTypeSchema(spark, config, mapping)
-    println("reading data")
+    logger.info("reading data")
     var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").schema(schema).load(config.dataInputFile)
     if(config.verbose)
-      println(data.count + " rows read")
+      logger.info(data.count + " rows read")
 
 
     val datatypes = ("redcap_repeat_instrument", "text") +: ("redcap_repeat_instance", "int") +: mapping.select("Fieldname_phase1", "Data Type").filter($"Fieldname_phase1" =!= "n/a").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
@@ -164,11 +171,11 @@ object Transform2 {
     // var i = 0
     // val n = dataColsExceptKnownRepeatedFields.size
     // val redundantData = dataColsExceptKnownRepeatedFields.flatMap(x => {
-    //   println("looking for repeat data in " + x + " " + i + "/" + n)
+    //   logger.info("looking for repeat data in " + x + " " + i + "/" + n)
     //   i += 1
     //   val dataValueCountByProposalID = data.select("proposal_id", x).filter(col(x) !== "").groupBy("proposal_id").agg(collect_set(col(x)).as(x + "_set"))
     //   val y = dataValueCountByProposalID.filter(size(col(x + "_set")) > 1).map(r => (r.getString(0),r.getSeq[String](1))).collect
-    //   println(y.mkString("\n"))
+    //   logger.info(y.mkString("\n"))
     //   if(y.nonEmpty) {
     //     Seq(y.map(y => (x, y._1, y._2)))
     //   } else {
@@ -203,13 +210,13 @@ object Transform2 {
 
     generateIDCols.foreach {
       case (col, as) =>
-        println("generating ID for column " + col)
+        logger.info("generating ID for column " + col)
         val cols2 = as.zip((0 until as.size).map("col" + _))
         cols2.foreach {
           case (ast, col2) =>
             data = data.withColumn(col2, DSLParser.eval(data, col2, ast))
         }
-        println("select columns " + as)
+        logger.info("select columns " + as)
         val df2 = data.select(cols2.map({case (_, col2) => data.col(col2)}) : _*).distinct.withColumn(col, monotonically_increasing_id)
         data = data.join(df2, cols2.map({case (_, col2) => col2}), "left")
         cols2.foreach {
@@ -217,7 +224,7 @@ object Transform2 {
             data = data.drop(col2)
         }
         if(config.verbose)
-          println(data.count + " rows remaining")
+          logger.info(data.count + " rows remaining")
     }
     data
   }
@@ -251,7 +258,7 @@ object Transform2 {
       .groupBy("Table_HEAL")
       .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL")).as("columns"))
 
-    println("copy " + columnToCopyTables.select("Table_HEAL").collect().mkString(","))
+    logger.info("copy " + columnToCopyTables.select("Table_HEAL").collect().mkString(","))
     val columnToCopyTablesMap = columnToCopyTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), Option(r.getSeq[Row](r.fieldIndex("columns")).map(x => (x.getString(0), x.getString(1)))).getOrElse(Seq())))
 
     def extractColumnToCopyTable(columns: Seq[(String, String)]) =
@@ -262,11 +269,11 @@ object Transform2 {
 
     columnToCopyTablesMap.foreach {
       case (table, columnsToCopy) =>
-        println("processing column to copy table " + table)
-        println("copy columns " + columnsToCopy.mkString("[", ",", "]"))
+        logger.info("processing column to copy table " + table)
+        logger.info("copy columns " + columnsToCopy.mkString("[", ",", "]"))
         val df = extractColumnToCopyTable(columnsToCopy)
         if(config.verbose)
-          println(df.count + " rows copied")
+          logger.info(df.count + " rows copied")
         tableMap(table) = df
     }
     columnsToCopy
@@ -296,20 +303,20 @@ object Transform2 {
       .groupBy("Table_HEAL", "Fieldname_HEAL", "Fieldname_phase1", "Data Type")
       .agg(collect_list("column").as("columns"))
 
-    println("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect().mkString(","))
+    logger.info("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect().mkString(","))
 
     val columnToUnpivotTablesMap = columnToUnpivotTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_phase1")), r.getString(r.fieldIndex("Fieldname_HEAL")), r.getString(r.fieldIndex("Data Type")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq())))
 
     val columnToUnpivotToSeparateTableTables = columnToUnpivotTables.groupBy("Table_HEAL").agg(count("Fieldname_HEAL").as("count"))
       .filter($"count" > 1).select("Table_HEAL").map(r => r.getString(0)).collect()
 
-    columnToUnpivotToSeparateTableTables.foreach(r => println(r + " has > 1 unpivot fields"))
+    columnToUnpivotToSeparateTableTables.foreach(r => logger.info(r + " has > 1 unpivot fields"))
 
     assert(columnToUnpivotToSeparateTableTables.isEmpty)
 
     def extractColumnToUnpivotTable(primaryKeys: Seq[(String,String,String)], column2: String, column2Type: String, unpivots: Seq[String]) = {
       val df = data.select((primaryKeys.map(_._1) ++ unpivots).map(data.col _) : _*).distinct()
-      println("processing unpivot " + column2 + " from " + unpivots.mkString("[",",","]"))
+      logger.info("processing unpivot " + column2 + " from " + unpivots.mkString("[",",","]"))
 
       def toDense(selections : Seq[Any]) : Seq[Any] =
         unpivots.zip(selections).filter{
@@ -337,13 +344,13 @@ object Transform2 {
     columnToUnpivotTablesMap.foreach {
       case (table, column0, column2, column2Type, columnsToUnpivot) =>
         val file = s"${config.outputDir}/tables/${table}"
-        println("processing column to unpivot table " + table + ", column " + column2)
-        println("unpivoting columns " + columnsToUnpivot.mkString("[", ",", "]"))
+        logger.info("processing column to unpivot table " + table + ", column " + column2)
+        logger.info("unpivoting columns " + columnsToUnpivot.mkString("[", ",", "]"))
         val pks = pkMap(table).filter(x => x._1 != "n/a" && x._1 != column0)
         val df = extractColumnToUnpivotTable(pks, column2, column2Type, columnsToUnpivot)
         val df2 = df.join(tableMap(table), pks.map(_._2))
         if(config.verbose)
-          println("joining " + tableMap(table).count() + " rows to " + df.count() + " rows on " + pks + ". The result has " + df2.count() + " rows ")
+          logger.info("joining " + tableMap(table).count() + " rows to " + df.count() + " rows on " + pks + ". The result has " + df2.count() + " rows ")
         tableMap(table) = df2
     }
     columnsToUnpivot
@@ -391,7 +398,7 @@ object Transform2 {
         val file2 = s"${config.outputDir}/tables/reviewer_organization"
         val extendColumnPrefix = "reviewer_name_"
         val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
-        println("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
+        logger.info("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
         val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
           val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer" =!= "").distinct
           val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
