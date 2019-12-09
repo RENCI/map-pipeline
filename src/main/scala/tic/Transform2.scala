@@ -372,8 +372,6 @@ object Transform2 {
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
-        spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
-
         val (data0, negdata) = readData(spark, config, mapping)
         var data = data0
 
