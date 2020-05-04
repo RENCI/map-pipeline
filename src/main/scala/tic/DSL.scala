@@ -16,7 +16,9 @@ case class Field(a:String) extends AST
 case class ExtractFirstName(a:AST) extends AST
 case class ExtractLastName(a:AST) extends AST
 case class GenerateID(a:Seq[AST]) extends AST
-case class Coalesce(a:AST, b:AST) extends AST
+case class If(a:AST,b:AST,c:AST) extends AST
+case class Infix(a:AST,b:String,c:AST) extends AST
+case class Lit(a:String) extends AST
 
 object DSL {
 
@@ -173,9 +175,16 @@ object DSL {
     def n_a : Parser[AST] = {
       "n/a" ^^ { _ => N_A}
     }
+
     def field: Parser[AST] = {
       "[a-zA-Z_][a-zA-Z0-9_]*".r ^^ { str => Field(str) }
     }
+
+    def string: Parser[String] = 
+      """"[^"]*"""".r ^^ { str =>
+        val content = str.substring(1, str.length - 1)
+        content
+      }
 
     def value: Parser[AST] = {
       "(" ~> term <~ ")" |
@@ -191,14 +200,18 @@ object DSL {
         case _ ~ fields =>
           GenerateID(fields)
       } |
+      "if" ~ term ~ "then" ~ term ~ "else" ~ term ^^ {
+        case _ ~ c ~ _ ~ t ~ _ ~ e => If(c ,t, e)
+      } |
+      string ^^ Lit |
       field
     }
 
     def term: Parser[AST] = {
-      value ~ rep("/" ~ term) ^^ {
+      value ~ rep(("/"|"=") ~ term) ^^ {
         case field ~ list =>
           list.foldLeft(field) {
-            case (a, _ ~ b) => Coalesce(a, b)
+            case (a, op ~ b) => Infix(a, op, b)
           }
       }
     }
@@ -220,8 +233,15 @@ object DSL {
           parseName(eval(df, col, a)).getItem(0)
         case ExtractLastName(a) =>
           parseName(eval(df, col, a)).getItem(1)
-        case Coalesce(a, b) =>
+        case Infix(a, "/", b) =>
           when(eval(df, col, a).isNull || eval(df, col, a) === lit(""), eval(df, col, b)).otherwise(eval(df, col, a))
+        case Infix(a, "=", b) =>
+          eval(df, col, a) === eval(df, col, b)
+        case Infix(a, op, b) => scala.sys.error(f"unsupported operator {op}")
+        case Lit(a) =>
+          lit(a)
+        case If(a, b, c) =>
+          when(eval(df, col, a), eval(df, col, b)).otherwise(eval(df, col, c))
         case GenerateID(_) =>
           df.col(col)
       }
@@ -234,8 +254,12 @@ object DSL {
           fields(a)
         case ExtractLastName(a) =>
           fields(a)
-        case Coalesce(a, b) =>
+        case Infix(a, _, b) =>
           fields(a).union(fields(b))
+        case Lit(_) =>
+          Seq()
+        case If(a, b, c) =>
+          fields(a).union(fields(b)).union(fields(c))
         case GenerateID(as) =>
           as.map(fields).reduce(_ union _)
       }
