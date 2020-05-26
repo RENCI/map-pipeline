@@ -199,6 +199,9 @@ object Transform2 {
     (data2, negdata.getOrElse(null))
   }
 
+  /**
+    * generate id columns in data. 
+    */
   def generateID(spark : SparkSession, config : Config2, mapping : DataFrame, data0 : DataFrame): DataFrame = {
     import spark.implicits._
     var data = data0
@@ -214,13 +217,17 @@ object Transform2 {
       case (col, as) =>
         logger.info("generating ID for column " + col)
         val cols2 = as.zip((0 until as.size).map("col" + _))
+        // evaluate asts and for each ast and add a new column to data
         cols2.foreach {
           case (ast, col2) =>
             data = data.withColumn(col2, DSLParser.eval(data, col2, ast))
         }
         logger.info("select columns " + as)
+        // select distinct values in the added columns and generate an id
         val df2 = data.select(cols2.map({case (_, col2) => data.col(col2)}) : _*).distinct.withColumn(col, monotonically_increasing_id)
+        // join data with id
         data = data.join(df2, cols2.map({case (_, col2) => col2}), "left")
+        // remove columns
         cols2.foreach {
           case (_, col2) =>
             data = data.drop(col2)
@@ -239,8 +246,10 @@ object Transform2 {
     (unknown, missing)
   }
 
+
   def copy(spark: SparkSession, config: Config2, tableMap : Map[String, DataFrame], mapping : DataFrame, data: DataFrame) : Seq[String] = {
     import spark.implicits._
+    // filter out columns that contain ___ which indicates many to many relationship
     def copyFilter(s:String) : Option[String] =
       s.indexOf("___") match {
         case -1 =>
@@ -249,13 +258,14 @@ object Transform2 {
           None
       }
     val dataCols = data.columns.toSeq
-    val columnsToCopy = dataCols.flatMap(copyFilter)
+    val columnsToCopy = dataCols.flatMap(copyFilter) // these are the columns that will be one to one or many to one
 
+    // we assume that a dsl term doesn't contain both copy columns and pivot columns. therefore if a fieldName_phase1 term contains a copy column then we process it here.
     val containsColumnToCopy = udf((fieldName_phase1 : String) => DSLParser.fields(DSLParser(fieldName_phase1)).intersect(columnsToCopy).nonEmpty)
 
     // columns to copy
     val columnToCopyTables = mapping
-      .filter(containsColumnToCopy($"Fieldname_phase1"))
+      .filter(containsColumnToCopy($"Fieldname_phase1")) // find dsl terms that contains copy columns. our assumption is that they must contain only copy columns.
       .filter($"Table_HEAL".isNotNull)
       .groupBy("Table_HEAL")
       .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL")).as("columns"))
@@ -296,19 +306,26 @@ object Transform2 {
 
 
     val unpivotMap = dataCols.flatMap(unpivotFilter)
-    val columnsToUnpivot = unpivotMap.map(_._2)
+    val unpivotColumnToColumnsMap = unpivotMap.groupBy(_._2).mapValues(_.map(_._1))
+
+    val columnsToUnpivot = unpivotMap.map(_._2).distinct
+
+    // we assume that a dsl term doesn't contain both copy columns and pivot columns. therefore if a fieldName_phase1 term contains a copy column then we process it here.
+    val containsColumnToUnpivot = udf((fieldName_phase1 : String) => DSLParser.fields(DSLParser(fieldName_phase1)).intersect(columnsToUnpivot).nonEmpty)
 
     // columns to unpivot
-    val columnToUnpivotTables = unpivotMap.toDF("column", "Fieldname_phase1")
-      .join(mapping, "Fieldname_phase1")
+    val columnToUnpivotTables = mapping
+      .filter(containsColumnToUnpivot($"Fieldname_phase1"))
       .filter($"Table_HEAL".isNotNull)
-      .groupBy("Table_HEAL", "Fieldname_HEAL", "Fieldname_phase1", "Data Type")
-      .agg(collect_list("column").as("columns"))
+      .select("Table_HEAL", "Fieldname_HEAL", "Fieldname_phase1", "Data Type")
+      .distinct
 
     logger.info("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect().mkString(","))
 
-    val columnToUnpivotTablesMap = columnToUnpivotTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_phase1")), r.getString(r.fieldIndex("Fieldname_HEAL")), r.getString(r.fieldIndex("Data Type")), Option(r.getSeq[String](r.fieldIndex("columns"))).getOrElse(Seq())))
+    val columnToUnpivotTablesMap = columnToUnpivotTables.collect
+      .map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_phase1")), r.getString(r.fieldIndex("Fieldname_HEAL")), r.getString(r.fieldIndex("Data Type"))))
 
+    // ensure that we don't have more than one many to many relationship in each table being mapped to
     val columnToUnpivotToSeparateTableTables = columnToUnpivotTables.groupBy("Table_HEAL").agg(count("Fieldname_HEAL").as("count"))
       .filter($"count" > 1).select("Table_HEAL").map(r => r.getString(0)).collect()
 
@@ -320,6 +337,7 @@ object Transform2 {
       val df = data.select((primaryKeys.map(_._1) ++ unpivots).map(data.col _) : _*).distinct()
       logger.info("processing unpivot " + column2 + " from " + unpivots.mkString("[",",","]"))
 
+      // find selected items
       def toDense(selections : Seq[Any]) : Seq[Any] =
         unpivots.zip(selections).filter{
           case (_, selection) => selection == "1" || selection == 1
@@ -344,8 +362,9 @@ object Transform2 {
     }
 
     columnToUnpivotTablesMap.foreach {
-      case (table, column0, column2, column2Type, columnsToUnpivot) =>
+      case (table, column0, column2, column2Type) =>
         val file = s"${config.outputDir}/tables/${table}"
+        val columnsToUnpivot = unpivotColumnToColumnsMap(column0)
         logger.info("processing column to unpivot table " + table + ", column " + column2)
         logger.info("unpivoting columns " + columnsToUnpivot.mkString("[", ",", "]"))
         val pks = pkMap(table).filter(x => x._1 != "n/a" && x._1 != column0)
@@ -380,6 +399,7 @@ object Transform2 {
 
         data = generateID(spark, config, mapping, data)
 
+        // 
         val tableMap = Map[String, DataFrame]()
         val columnsToCopy = copy(spark, config, tableMap, mapping, data)
         val columnsToUnpivot = collect(spark, config, tableMap, mapping, data)
