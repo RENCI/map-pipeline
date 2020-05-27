@@ -132,8 +132,8 @@ object Transform2 {
     import spark.implicits._
     val pkMap = mapping
       .filter($"Primary" === "yes")
-      .groupBy("Table_HEAL")
-      .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL", "Data Type")).as("primaryKeys"))
+      .groupBy("Table_CTMD")
+      .agg(collect_list(struct("Fieldname_redcap", "Fieldname_CTMD", "Data Type")).as("primaryKeys"))
       .map(r => (r.getString(0), r.getSeq[Row](1).map(x => (x.getString(0), x.getString(1), x.getString(2)))))
       .collect()
       .toMap
@@ -159,7 +159,7 @@ object Transform2 {
       logger.info(data.count + " rows read")
 
 
-    val datatypes = ("redcap_repeat_instrument", "text") +: ("redcap_repeat_instance", "int") +: mapping.select("Fieldname_phase1", "Data Type").filter($"Fieldname_phase1" =!= "n/a").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
+    val datatypes = ("redcap_repeat_instrument", "text") +: ("redcap_repeat_instance", "int") +: mapping.select("Fieldname_redcap", "Data Type").filter($"Fieldname_redcap" =!= "n/a").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
     val dataCols = data.columns.toSeq
     for(datatype <- datatypes) {
       val col = datatype._1
@@ -205,7 +205,7 @@ object Transform2 {
   def generateID(spark : SparkSession, config : Config2, mapping : DataFrame, data0 : DataFrame): DataFrame = {
     import spark.implicits._
     var data = data0
-    val generateIDCols = mapping.select("Fieldname_HEAL", "Fieldname_phase1").distinct.collect.flatMap(x => {
+    val generateIDCols = mapping.select("Fieldname_CTMD", "Fieldname_redcap").distinct.collect.flatMap(x => {
       val ast = DSLParser(x.getString(1))
       ast match {
         case GenerateID(as) => Some((x.getString(0), as))
@@ -240,7 +240,7 @@ object Transform2 {
 
   def diff(spark : SparkSession, mapping : DataFrame, dataCols2 : Seq[String]) : (DataFrame, DataFrame) = {
     import spark.implicits._
-    val mappingCols = mapping.select("Fieldname_phase1").distinct.map(x => DSLParser.fields(DSLParser(x.getString(0)))).collect().toSeq.flatten
+    val mappingCols = mapping.select("Fieldname_redcap").distinct.map(x => DSLParser.fields(DSLParser(x.getString(0)))).collect().toSeq.flatten
     val unknown = dataCols2.diff(mappingCols).toDF("column")
     val missing = mappingCols.diff(dataCols2).toDF("colums")
     (unknown, missing)
@@ -265,13 +265,13 @@ object Transform2 {
 
     // columns to copy
     val columnToCopyTables = mapping
-      .filter(containsColumnToCopy($"Fieldname_phase1")) // find dsl terms that contains copy columns. our assumption is that they must contain only copy columns.
-      .filter($"Table_HEAL".isNotNull)
-      .groupBy("Table_HEAL")
-      .agg(collect_list(struct("Fieldname_phase1", "Fieldname_HEAL")).as("columns"))
+      .filter(containsColumnToCopy($"Fieldname_redcap")) // find dsl terms that contains copy columns. our assumption is that they must contain only copy columns.
+      .filter($"Table_CTMD".isNotNull)
+      .groupBy("Table_CTMD")
+      .agg(collect_list(struct("Fieldname_redcap", "Fieldname_CTMD")).as("columns"))
 
-    logger.info("copy " + columnToCopyTables.select("Table_HEAL").collect().mkString(","))
-    val columnToCopyTablesMap = columnToCopyTables.collect.map(r => (r.getString(r.fieldIndex("Table_HEAL")), Option(r.getSeq[Row](r.fieldIndex("columns")).map(x => (x.getString(0), x.getString(1)))).getOrElse(Seq())))
+    logger.info("copy " + columnToCopyTables.select("Table_CTMD").collect().mkString(","))
+    val columnToCopyTablesMap = columnToCopyTables.collect.map(r => (r.getString(r.fieldIndex("Table_CTMD")), Option(r.getSeq[Row](r.fieldIndex("columns")).map(x => (x.getString(0), x.getString(1)))).getOrElse(Seq())))
 
     def extractColumnToCopyTable(columns: Seq[(String, String)]) =
       data.select( columns.map {
@@ -315,19 +315,19 @@ object Transform2 {
 
     // columns to unpivot
     val columnToUnpivotTables = mapping
-      .filter(containsColumnToUnpivot($"Fieldname_phase1"))
-      .filter($"Table_HEAL".isNotNull)
-      .select("Table_HEAL", "Fieldname_HEAL", "Fieldname_phase1", "Data Type")
+      .filter(containsColumnToUnpivot($"Fieldname_redcap"))
+      .filter($"Table_CTMD".isNotNull)
+      .select("Table_CTMD", "Fieldname_CTMD", "Fieldname_redcap", "Data Type")
       .distinct
 
-    logger.info("unpivot " + columnToUnpivotTables.select("Table_HEAL","Fieldname_HEAL").collect().mkString(","))
+    logger.info("unpivot " + columnToUnpivotTables.select("Table_CTMD","Fieldname_CTMD").collect().mkString(","))
 
     val columnToUnpivotTablesMap = columnToUnpivotTables.collect
-      .map(r => (r.getString(r.fieldIndex("Table_HEAL")), r.getString(r.fieldIndex("Fieldname_phase1")), r.getString(r.fieldIndex("Fieldname_HEAL")), r.getString(r.fieldIndex("Data Type"))))
+      .map(r => (r.getString(r.fieldIndex("Table_CTMD")), r.getString(r.fieldIndex("Fieldname_redcap")), r.getString(r.fieldIndex("Fieldname_CTMD")), r.getString(r.fieldIndex("Data Type"))))
 
     // ensure that we don't have more than one many to many relationship in each table being mapped to
-    val columnToUnpivotToSeparateTableTables = columnToUnpivotTables.groupBy("Table_HEAL").agg(count("Fieldname_HEAL").as("count"))
-      .filter($"count" > 1).select("Table_HEAL").map(r => r.getString(0)).collect()
+    val columnToUnpivotToSeparateTableTables = columnToUnpivotTables.groupBy("Table_CTMD").agg(count("Fieldname_CTMD").as("count"))
+      .filter($"count" > 1).select("Table_CTMD").map(r => r.getString(0)).collect()
 
     columnToUnpivotToSeparateTableTables.foreach(r => logger.info(r + " has > 1 unpivot fields"))
 
@@ -387,7 +387,7 @@ object Transform2 {
 
         import spark.implicits._
 
-        val mapping = spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_HEAL", $"Fieldname_phase1", $"Data Type", $"Table_HEAL", $"Primary")
+        val mapping = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_CTMD", $"Fieldname_redcap", $"Data Type", $"Table_CTMD", $"Primary")
 
         val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
@@ -433,10 +433,10 @@ object Transform2 {
         })
         val ddrdd = dataDict
           .join(mapping
-            .withColumn("field_name", func1($"Fieldname_phase1"))
+            .withColumn("field_name", func1($"Fieldname_redcap"))
             , Seq("field_name"))
           .filter($"select_choices_or_calculations" =!= "")
-          .select("field_name", "select_choices_or_calculations", "Fieldname_HEAL", "Table_HEAL")
+          .select("field_name", "select_choices_or_calculations", "Fieldname_CTMD", "Table_CTMD")
           .rdd
           .flatMap(row => {
             val field_name = row.getString(0)
