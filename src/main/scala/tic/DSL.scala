@@ -135,13 +135,17 @@ object DSL {
     def isWellFormedFirstName(input: String) : Boolean =
       parseAll(first_name, input) match {
         case Success(result, _) => true
-        case failure: NoSuccess => false
+        case failure: NoSuccess =>
+          println(failure)
+          false
       }
 
     def isWellFormedLastName(input: String) : Boolean =
       parseAll(last_name, input) match {
         case Success(result, _) => true
-        case failure: NoSuccess => false
+        case failure: NoSuccess =>
+          println(failure)
+          false
       }
 
   }

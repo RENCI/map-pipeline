@@ -47,13 +47,23 @@ object DataFilter {
   val testDataFilter : Boolean => SourceDataFilter = (verbose: Boolean) => (data : DataFrame) => {
     logger.info("filtering data 2")
     val filterProposal = udf(
-      (title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
-      (title == "" || !title.contains(' ')) ||
-        ((pi_firstname != "" && !NameParser.isWellFormedFirstName(pi_firstname.head +: pi_firstname.tail.toLowerCase)) &&
-          (pi_lastname != "" && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase)))
+      (pid: String, title : String, short_name: String, pi_firstname : String, pi_lastname : String) =>
+      if (title == "") {
+        logger.info(s"$pid is filtered because title is empty")
+        true
+      } else if (!title.contains(' ')) {
+        logger.info(s"$pid is filtered because title doesn't contains a space")
+        true
+      } else if ((pi_firstname != "" && !NameParser.isWellFormedFirstName(pi_firstname.head +: pi_firstname.tail.toLowerCase)) &&
+        (pi_lastname != "" && !NameParser.isWellFormedLastName(pi_lastname.head +: pi_lastname.tail.toLowerCase))) {
+        logger.info(s"$pid is filterd because both pi_firstname [$pi_firstname] and pi_lastname [$pi_lastname] are nonempty and not well-formed")
+        true
+      } else {
+        false
+      }
     )
 
-    val f = filterProposal(data.col("proposal_title2"), data.col("short_name"), data.col("pi_firstname"), data.col("pi_lastname"))
+    val f = filterProposal(data.col("proposal_id"), data.col("proposal_title2"), data.col("short_name"), data.col("pi_firstname"), data.col("pi_lastname"))
     val negdata = data.filter(f)
 
     val data2 = data.filter(!f)
@@ -186,6 +196,8 @@ object Transform2 {
     // }).toDF("proposal_id", "column", "value")
     // writeDataframe(hc, config.outputDir + "/redundant", redundantData, header = true)
 
+    data = data.withColumn("pi_firstname", trim(data.col("pi_firstname")))
+    data = data.withColumn("pi_lastname", trim(data.col("pi_lastname")))
     val (data2, negdata) =
       comp(
         comp(
