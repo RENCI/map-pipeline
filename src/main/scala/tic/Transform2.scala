@@ -25,6 +25,7 @@ case class Config2(
   dataDictInputFile:String="",
   auxiliaryDir:String="",
   filterDir:String="",
+  blocklistDir:String="",
   outputDir:String="",
   verbose:Boolean=false
 )
@@ -87,16 +88,45 @@ object DataFilter {
     })
 
     var data2 = data
-    dataMappingDfs.foreach {
-      case df =>
-        val column = df.columns.head
-        logger.info("joining dataframes")
-        logger.info("data: " + data.columns.toSeq)
-        logger.info("aux: " + df.columns.toSeq)
-        logger.info("on " + column)
-        logger.info("join type: " + joinType)
-        data2 = data2.join(df, Seq(column), joinType)
-    }
+    dataMappingDfs.foreach (df => {
+      val columns = df.columns.intersect(data2.columns)
+      logger.info("joining dataframes")
+      logger.info("data: " + data.columns.toSeq)
+      logger.info("aux: " + df.columns.toSeq)
+      logger.info("on " + columns)
+      logger.info("join type: " + joinType)
+      data2 = data2.join(df, columns, joinType)
+    })
+    (data2, None)
+  }
+
+  val blockDataFilter : (SparkSession, String) => SourceDataFilter = (spark, blocklistDir) => (data : DataFrame) => {
+    logger.info("loading blocklists from dir " + blocklistDir)
+    val dataMappingDfs = new File(blocklistDir).listFiles.toSeq.map((f) => {
+      logger.info("loading blocklist " + f.getAbsolutePath())
+      spark.read.format("csv").option("header", true).option("mode", "FAILFAST").load(f.getAbsolutePath())
+    })
+
+    var data2 = data
+    dataMappingDfs.foreach (df => {
+      val joinColumns = df.columns
+      logger.info("joining dataframes")
+      logger.info("data: " + data.columns.toSeq)
+      logger.info("blocklist: " + df.columns.toSeq)
+      logger.info("on " + joinColumns.toSeq)
+      var i = 0
+      var col = "_block"
+      val columnSet = df.columns.toSet.union(data.columns.toSet)
+      while (columnSet.contains(col)) {
+        i+=1
+        col = "_block" + i
+      } 
+      val df2 = df.withColumn(col, lit(true))
+      df2.show()
+      data2 = data2.join(df2, joinColumns, "left")
+      data2.show()
+      data2 = data2.filter(data2.col(col).isNull).drop(col)
+    })
     (data2, None)
   }
 
@@ -122,6 +152,7 @@ object Transform2 {
       opt[String]("data_dictionary_input_file").required().action((x, c) => c.copy(dataDictInputFile = x)),
       opt[String]("auxiliary_dir").required().action((x, c) => c.copy(auxiliaryDir = x)),
       opt[String]("filter_dir").required().action((x, c) => c.copy(filterDir = x)),
+      opt[String]("block_dir").required().action((x, c) => c.copy(blocklistDir = x)),
       opt[String]("output_dir").required().action((x, c) => c.copy(outputDir = x)),
       opt[Unit]("verbose").action((_, c) => c.copy(verbose = true)))
   }
@@ -202,10 +233,12 @@ object Transform2 {
       comp(
         comp(
           comp(
-            filter1(config.verbose),
-            testDataFilter(config.verbose)
-          ), if(config.auxiliaryDir == "") id else auxDataFilter(spark, config.auxiliaryDir, "left")
-        ), if(config.filterDir == "") id else auxDataFilter(spark, config.filterDir, "inner")
+            comp(
+              filter1(config.verbose),
+              testDataFilter(config.verbose)
+            ), if(config.auxiliaryDir == "") id else auxDataFilter(spark, config.auxiliaryDir, "left")
+          ), if(config.filterDir == "") id else auxDataFilter(spark, config.filterDir, "inner")
+        ), if(config.blocklistDir == "") id else blockDataFilter(spark, config.blocklistDir)
       )(data)
 
     (data2, negdata.getOrElse(null))
