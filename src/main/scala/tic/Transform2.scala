@@ -70,6 +70,8 @@ object DataFilter {
     val data2 = data.filter(!f)
     if(verbose)
       logger.info(data.count + " rows remaining")
+    data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
+    negdata.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
     (data2, Some(negdata))
   }
 
@@ -78,6 +80,7 @@ object DataFilter {
     val data2 = data.filter(data.col("redcap_repeat_instrument") === "" && data.col("redcap_repeat_instance").isNull)
     if(verbose)
       logger.info(data2.count + " rows remaining")
+    data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
     (data2, None)
   }
 
@@ -96,6 +99,7 @@ object DataFilter {
       logger.info("on " + columns)
       logger.info("join type: " + joinType)
       data2 = data2.join(df, columns, joinType)
+      data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
     })
     (data2, None)
   }
@@ -124,8 +128,9 @@ object DataFilter {
       val df2 = df.withColumn(col, lit(true))
       df2.show()
       data2 = data2.join(df2, joinColumns, "left")
-      data2.show()
+      data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study", col).show(Integer.MAX_VALUE)
       data2 = data2.filter(data2.col(col).isNull).drop(col)
+      data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
     })
     (data2, None)
   }
@@ -243,6 +248,8 @@ object Transform2 {
 
     (data2, negdata.getOrElse(null))
   }
+
+  data2.cache()
 
   /**
     * generate id columns in data. 
