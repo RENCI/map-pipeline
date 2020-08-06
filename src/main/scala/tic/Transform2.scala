@@ -1,5 +1,6 @@
 package tic
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.storage.StorageLevel
 import scopt._
 import tic.Utils._
 import org.apache.spark.sql.functions._
@@ -33,6 +34,10 @@ case class Config2(
 object DataFilter {
   import Transform2._
   type SourceDataFilter = DataFrame => (DataFrame, Option[DataFrame])
+
+  def to_string(ti: String, df: DataFrame) = Tabulator.format(ti, df.columns.toSeq, df.collect().map((row) => row.toSeq))
+
+  def to_string_seq[A](s: Seq[A]) = s.mkString("\n")
 
   def comp(a : SourceDataFilter, b : SourceDataFilter) : SourceDataFilter = df => {
     val (df1, nd1) = a(df)
@@ -70,8 +75,9 @@ object DataFilter {
     val data2 = data.filter(!f)
     if(verbose)
       logger.info(data.count + " rows remaining")
-    data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
-    negdata.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
+    logger.info("\n" + to_string("non test data", data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study")))
+    logger.info("\n" + to_string("test data", negdata.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study")))
+    data2.persist(StorageLevel.MEMORY_AND_DISK)
     (data2, Some(negdata))
   }
 
@@ -80,7 +86,8 @@ object DataFilter {
     val data2 = data.filter(data.col("redcap_repeat_instrument") === "" && data.col("redcap_repeat_instance").isNull)
     if(verbose)
       logger.info(data2.count + " rows remaining")
-    data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
+    logger.info("\n" + to_string("current data", data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study")))
+    data2.persist(StorageLevel.MEMORY_AND_DISK)
     (data2, None)
   }
 
@@ -94,13 +101,14 @@ object DataFilter {
     dataMappingDfs.foreach (df => {
       val columns = df.columns.intersect(data2.columns)
       logger.info("joining dataframes")
-      logger.info("data: " + data.columns.toSeq)
-      logger.info("aux: " + df.columns.toSeq)
-      logger.info("on " + columns)
+      logger.info("data: " + to_string_seq(data.columns.toSeq))
+      logger.info("aux: " + to_string_seq(df.columns.toSeq))
+      logger.info("on " + to_string_seq(columns))
       logger.info("join type: " + joinType)
       data2 = data2.join(df, columns, joinType)
-      data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
+      logger.info("\n" + to_string(s"data $joinType join aux", data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study")))
     })
+    data2.persist(StorageLevel.MEMORY_AND_DISK)
     (data2, None)
   }
 
@@ -115,9 +123,9 @@ object DataFilter {
     dataMappingDfs.foreach (df => {
       val joinColumns = df.columns
       logger.info("joining dataframes")
-      logger.info("data: " + data.columns.toSeq)
-      logger.info("blocklist: " + df.columns.toSeq)
-      logger.info("on " + joinColumns.toSeq)
+      logger.info("data columns: " + to_string_seq(data.columns.toSeq))
+      logger.info("blocklist columns: " + to_string_seq(df.columns.toSeq))
+      logger.info("on " + to_string_seq(joinColumns.toSeq))
       var i = 0
       var col = "_block"
       val columnSet = df.columns.toSet.union(data.columns.toSet)
@@ -126,19 +134,73 @@ object DataFilter {
         col = "_block" + i
       } 
       val df2 = df.withColumn(col, lit(true))
-      df2.show()
-      data2 = data2.join(df2, joinColumns, "left")
-      data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study", col).show(Integer.MAX_VALUE)
+      logger.info("\n" + to_string("blocklist df", df2))
+      val joinCondition = joinColumns.map(a => data2.col(a) <=> df2.col(a)).reduce((a, b) => a && b)
+      data2 = data2.join(df2, joinCondition, "left")
+      for (joinColumn <- joinColumns)
+        data2 = data2.drop(df2(joinColumn))
+      logger.info("\n" + to_string("data left join blocklist df", data2.select("proposal_id", ("redcap_repeat_instance" +: "redcap_repeat_instrument" +: "heal_study" +: joinColumns :+ col): _*)))
       data2 = data2.filter(data2.col(col).isNull).drop(col)
-      data2.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study").show(Integer.MAX_VALUE)
+      logger.info("\n" + to_string("data filtered by blocklist", data2.select("proposal_id", ("redcap_repeat_instance" +: "redcap_repeat_instrument" +: "heal_study" +: joinColumns): _*)))
     })
+    data2.persist(StorageLevel.MEMORY_AND_DISK)
     (data2, None)
   }
 
 }
 
+// https://stackoverflow.com/questions/7539831/scala-draw-table-to-console
+object Tabulator {
+  def dim(s: Seq[String]): (Int, Int) = (if (s.isEmpty) 0 else s.map(_.length).max, s.size)
+
+  def wrapText(s : String): Seq[String] = s.grouped(26).toSeq
+  def spacify(s: Any) : Seq[String] = if (s == null) Seq() else s.toString.split("\n").map(_.replace("\r", "").replace("\t", "    ")).flatMap(wrapText)
+
+  def format(title0:Any, header0 : Seq[Any], rows0: Seq[Seq[Any]]) = {
+    val title = spacify(title0)
+    val header = header0.map(spacify)
+    val rows = rows0.map(_.map(spacify))
+    val table = header +: rows
+
+    val sizes = for (row <- table) yield for (cell <- row) yield dim(cell)
+
+    val colSizes = for (col <- sizes.transpose) yield if (col.isEmpty) 0 else col.map(_._1).max
+    val rowSizes = for (row <- sizes) yield if (row.isEmpty) 0 else row.map(_._2).max
+    val titleSize = dim(title)
+    val tableWidth = Math.max(colSizes.sum, titleSize._1)
+    val pad = Math.max(0, tableWidth - colSizes.sum)
+    val pad1 = pad.toFloat / colSizes.size
+    val colSizesPad = colSizes.zipWithIndex.map {
+      case (colSize, i) => colSize + Math.round(Math.ceil(pad1 * i)).toInt
+    }
+    val rowsFormatted = for ((row, rowSize) <- rows zip rowSizes.tail) yield formatRow(row, rowSize, colSizesPad)
+    val headerFormatted = formatRow(header, rowSizes.head, colSizesPad)
+    val titleFormatted = formatRow(Seq(title), titleSize._2, Seq(colSizesPad.sum + (colSizesPad.size - 1)))
+    formatRows(rowSeparator(colSizesPad), titleFormatted, headerFormatted, rowsFormatted)
+  }
+
+  def formatRows(rowSeparator: String, title : String, header : String, rows: Seq[String]): String = (
+    (
+      rowSeparator +:
+      title +:
+      rowSeparator +: 
+      header +:
+      rowSeparator :+
+      (if (rows.isEmpty) Seq() else rows.tail.foldLeft(Seq[String](rows.head))((l,v)=> l :+ rowSeparator :+ v)) +: rowSeparator)).mkString("\n")
+
+  def formatRow(row: Seq[Seq[String]], rowSize: Int, colSizes: Seq[Int]) =
+    (for (
+      line <- row.map(cell => cell ++ Seq.fill(rowSize - cell.size)("")).transpose
+    ) yield (for (
+      (item, size) <- line zip colSizes
+    ) yield if (size == 0) "" else ("%-" + size + "s").format(item)).mkString("|", "|", "|")).mkString("\n")
+
+  def rowSeparator(colSizes: Seq[Int]) = colSizes map { "-" * _ } mkString("+", "+", "+")
+}
+
 import DataFilter._
 object Transform2 {
+
 
   val logger = Logger.getLogger(this.getClass().getName())
   logger.setLevel(Level.FINEST)
@@ -248,8 +310,6 @@ object Transform2 {
 
     (data2, negdata.getOrElse(null))
   }
-
-  data2.cache()
 
   /**
     * generate id columns in data. 
@@ -445,6 +505,8 @@ object Transform2 {
 
         val (data0, negdata) = readData(spark, config, mapping)
         var data = data0
+        logger.info("\n"+ to_string("raw data", data.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study")))
+        data.persist(StorageLevel.MEMORY_AND_DISK)
 
         writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
         val dataCols = data.columns.toSeq
@@ -464,6 +526,8 @@ object Transform2 {
         tableMap.foreach {
           case (table, df) =>
             val file = s"${config.outputDir}/tables/${table}"
+            df.persist(StorageLevel.MEMORY_AND_DISK)
+            logger.info("\n" + to_string(s"table $table", df))
             writeDataframe(hc, file, df, header = true)
         }
 
