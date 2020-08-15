@@ -185,8 +185,8 @@ object Tabulator {
       title +:
       rowSeparator +: 
       header +:
-      rowSeparator :+
-      (if (rows.isEmpty) Seq() else rows.tail.foldLeft(Seq[String](rows.head))((l,v)=> l :+ rowSeparator :+ v)) +: rowSeparator)).mkString("\n")
+      rowSeparator +:
+      (if (rows.isEmpty) Seq() else rows.tail.foldLeft(Seq[String](rows.head))((l,v)=> l :+ rowSeparator :+ v)) :+ rowSeparator)).mkString("\n")
 
   def formatRow(row: Seq[Seq[String]], rowSize: Int, colSizes: Seq[Int]) =
     (for (
