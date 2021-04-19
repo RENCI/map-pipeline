@@ -30,7 +30,7 @@ object DSL {
     }
 
     def name : Parser[String] = {
-      name0 ~ ("-" ~ name0).? ^^ {
+      name0 ~ (("-" ||| " ") ~ name0).? ^^ {
         case a ~ None => a
         case a ~ Some(b ~ c) => a + b + c
       }
