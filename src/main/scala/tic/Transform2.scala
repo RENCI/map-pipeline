@@ -16,6 +16,7 @@ import java.io.File
 import java.util.logging.Logger
 import java.util.logging.Level
 import java.util.logging.ConsoleHandler
+import scala.collection.JavaConverters._
 import tic.DSL._
 import tic.GetData.getData
 import tic.GetDataDict.getDataDict
@@ -135,8 +136,12 @@ object DataFilter {
       } 
       val df2 = df.withColumn(col, lit(true))
       logger.info("\n" + to_string("blocklist df", df2))
-      val joinCondition = joinColumns.map(a => data2.col(a) <=> df2.col(a)).reduce((a, b) => a && b)
-      data2 = data2.join(df2, joinCondition, "left")
+      val joinCondition = joinColumns.map(a => data2.col(a) <=> df2.col(a)).reduceOption((a, b) => a && b)
+      joinCondition match {
+        case Some(joinCondition) =>
+          data2 = data2.join(df2, joinCondition, "left")
+        case _ =>
+      }
       for (joinColumn <- joinColumns)
         data2 = data2.drop(df2(joinColumn))
       logger.info("\n" + to_string("data left join blocklist df", data2.select("proposal_id", ("redcap_repeat_instance" +: "redcap_repeat_instrument" +: "heal_study" +: joinColumns :+ col): _*)))
@@ -539,7 +544,7 @@ object Transform2 {
           val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer" =!= "").distinct
           val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
           reviewers.withColumn("organization", lit(organization))
-        }).reduce(_ union _)
+        }).reduceOption(_ union _).getOrElse(spark.createDataFrame(Seq[Row]().asJava, StructType(Seq(StructField("reviewer", StringType, false), StructField("organization", StringType, false)))))
         writeDataframe(hc, file2, df, header = true)
 
         val file3 = s"${config.outputDir}/tables/name"
