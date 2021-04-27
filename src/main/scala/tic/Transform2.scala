@@ -305,10 +305,8 @@ object Transform2 {
       comp(
         comp(
           comp(
-            comp(
-              filter1(config.verbose),
-              testDataFilter(config.verbose)
-            ), if(config.auxiliaryDir == "") id else auxDataFilter(spark, config.auxiliaryDir, "left")
+            filter1(config.verbose),
+            if(config.auxiliaryDir == "") id else auxDataFilter(spark, config.auxiliaryDir, "left")
           ), if(config.filterDir == "") id else auxDataFilter(spark, config.filterDir, "inner")
         ), if(config.blocklistDir == "") id else blockDataFilter(spark, config.blocklistDir)
       )(data)
