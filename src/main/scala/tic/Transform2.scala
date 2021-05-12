@@ -511,7 +511,6 @@ object Transform2 {
         logger.info("\n"+ to_string("raw data", data.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study")))
         data.persist(StorageLevel.MEMORY_AND_DISK)
 
-        writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
         val dataCols = data.columns.toSeq
 
         data = generateID(spark, config, mapping, data)
