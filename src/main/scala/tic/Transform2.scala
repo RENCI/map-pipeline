@@ -305,10 +305,8 @@ object Transform2 {
       comp(
         comp(
           comp(
-            comp(
-              filter1(config.verbose),
-              testDataFilter(config.verbose)
-            ), if(config.auxiliaryDir == "") id else auxDataFilter(spark, config.auxiliaryDir, "left")
+            filter1(config.verbose),
+            if(config.auxiliaryDir == "") id else auxDataFilter(spark, config.auxiliaryDir, "left")
           ), if(config.filterDir == "") id else auxDataFilter(spark, config.filterDir, "inner")
         ), if(config.blocklistDir == "") id else blockDataFilter(spark, config.blocklistDir)
       )(data)
@@ -513,7 +511,6 @@ object Transform2 {
         logger.info("\n"+ to_string("raw data", data.select("proposal_id", "redcap_repeat_instance", "redcap_repeat_instrument", "heal_study")))
         data.persist(StorageLevel.MEMORY_AND_DISK)
 
-        writeDataframe(hc, config.outputDir + "/filtered", negdata, header = true)
         val dataCols = data.columns.toSeq
 
         data = generateID(spark, config, mapping, data)
