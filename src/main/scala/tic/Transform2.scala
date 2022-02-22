@@ -136,7 +136,7 @@ object DataFilter {
       } 
       val df2 = df.withColumn(col, lit(true))
       logger.info("\n" + to_string("blocklist df", df2))
-      val joinCondition = joinColumns.map(a => data2.col(a) <=> df2.col(a)).reduceOption((a, b) => a && b)
+      val joinCondition = joinColumns.map(a => data2.col(a) === df2.col(a)).reduceOption((a, b) => a && b)
       joinCondition match {
         case Some(joinCondition) =>
           data2 = data2.join(df2, joinCondition, "left")
