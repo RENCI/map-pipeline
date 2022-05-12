@@ -4,11 +4,11 @@
 
 https://www.scala-sbt.org/download.html
 
-### compile code
+### compile code using sbt-assembly plugin to create a project JAR file with all of its dependencies
 ```
 sbt assembly
 ```
-the jar file is at `target/scala-2.11/TIC preprocessing-assembly-0.1.0.jar`
+the jar file generated is at `target/scala-2.11/TIC preprocessing-assembly-0.1.0.jar`
 
 ### process data
 
