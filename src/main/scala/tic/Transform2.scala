@@ -205,14 +205,13 @@ object Tabulator {
 
 import DataFilter._
 object Transform2 {
-
-
   val logger = Logger.getLogger(this.getClass().getName())
   logger.setLevel(Level.FINEST)
 
   val ch = new ConsoleHandler()
   logger.addHandler(ch)
   ch.setLevel(Level.FINEST)
+  // use OParser class in scopt package to parse input argument typed by Config2 class
   val builder = OParser.builder[Config2]
   val parser =  {
     import builder._
@@ -271,7 +270,9 @@ object Transform2 {
     if(config.verbose)
       logger.info(data.count + " rows read")
 
-
+    // =!= is inequality test in spark.sql.Column
+    // toSeq() returns a sequence ArrayBuffer from the Scala map
+    // +: prepend a single element to the ArrayBuffer
     val datatypes = ("redcap_repeat_instrument", "text") +: ("redcap_repeat_instance", "int") +: mapping.select("Fieldname_redcap", "Data Type").filter($"Fieldname_redcap" =!= "n/a").distinct.map(r => (r.getString(0), r.getString(1))).collect.toSeq
     val dataCols = data.columns.toSeq
     for(datatype <- datatypes) {
@@ -493,6 +494,7 @@ object Transform2 {
   }
 
   def main(args : Array[String]) {
+    // entry point of transform class
     OParser.parse(parser, args, Config2()) match {
       case Some(config) =>
         val spark = SparkSession.builder.appName("Transform").getOrCreate()
