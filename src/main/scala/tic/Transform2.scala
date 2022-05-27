@@ -539,13 +539,14 @@ object Transform2 {
         val extendColumnPrefix = "reviewer_name_"
         val reviewerOrganizationColumns = dataCols.filter(column => column.startsWith(extendColumnPrefix))
         logger.info("processing table reviewer_organization extending columns " + reviewerOrganizationColumns)
-        val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
-          val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer" =!= "").distinct
-          val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
-          reviewers.withColumn("organization", lit(organization))
-        }).reduceOption(_ union _).getOrElse(spark.createDataFrame(Seq[Row]().asJava, StructType(Seq(StructField("reviewer", StringType, false), StructField("organization", StringType, false)))))
-        writeDataframe(hc, file2, df, header = true)
-
+        if (reviewerOrganizationColumns.size > 0) {
+            val df = reviewerOrganizationColumns.map(reviewOrganizationColumn => {
+              val reviewers = data.select(data.col(reviewOrganizationColumn).as("reviewer")).filter($"reviewer" =!= "").distinct
+              val organization = reviewOrganizationColumn.drop(extendColumnPrefix.length)
+              reviewers.withColumn("organization", lit(organization))
+            }).reduceOption(_ union _).getOrElse(spark.createDataFrame(Seq[Row]().asJava, StructType(Seq(StructField("reviewer", StringType, false), StructField("organization", StringType, false)))))
+            writeDataframe(hc, file2, df, header = true)
+        }
         val file3 = s"${config.outputDir}/tables/name"
         val func1 = udf((x : String) => DSLParser.fields(DSLParser(x)) match {
           case Nil => null
@@ -572,11 +573,10 @@ object Transform2 {
                 }
             }
           })
-
+        // the lit() function creates a Column object out of a literal value
         val ctsa = dataDict
           .filter($"field_name".rlike("^ctsa_[0-9]*$"))
           .select(lit("org_name").as("field_name"), lit("Submitter").as("table"), lit("submitterInstitution").as("column"), $"field_name".substr(lit(6), length($"field_name")).as("index"), $"field_label".as("description"))
-
         val df2 = spark.createDataFrame(ddrdd, StructType(Seq(
           StructField("field_name", StringType, true),
           StructField("table", StringType, true),
