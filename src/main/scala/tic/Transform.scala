@@ -33,7 +33,7 @@ case class Config2(
 )
 
 object DataFilter {
-  import Transform2._
+  import Transform._
   type SourceDataFilter = DataFrame => (DataFrame, Option[DataFrame])
 
   def to_string(ti: String, df: DataFrame) = Tabulator.format(ti, df.columns.toSeq, df.collect().map((row) => row.toSeq))
@@ -204,7 +204,7 @@ object Tabulator {
 }
 
 import DataFilter._
-object Transform2 {
+object Transform {
   val logger = Logger.getLogger(this.getClass().getName())
   logger.setLevel(Level.FINEST)
 

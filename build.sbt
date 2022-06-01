@@ -25,4 +25,4 @@ assemblyMergeStrategy in assembly := {
     oldStrategy(x)
 }
 
-mainClass in assembly := Some("tic.Transform2")
+mainClass in assembly := Some("tic.Transform")
