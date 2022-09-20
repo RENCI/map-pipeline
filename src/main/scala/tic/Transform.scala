@@ -255,7 +255,7 @@ object Transform {
   }
 
   def allStringTypeSchema(spark: SparkSession, config : Config2): StructType = {
-    val data0 = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataInputFile)
+    val data0 = spark.read.format("org.apache.spark.sql.execution.datasources.json.JsonFileFormat").option("multiline", true).option("mode", "FAILFAST").load(config.dataInputFile)
     val data0Cols = data0.columns
     StructType(data0Cols.map(x => {
       StructField(x, StringType, true)
@@ -266,7 +266,7 @@ object Transform {
     import spark.implicits._
     val schema = allStringTypeSchema(spark, config)
     logger.info("reading data")
-    var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").schema(schema).load(config.dataInputFile)
+    var data = spark.read.format("org.apache.spark.sql.execution.datasources.json.JsonFileFormat").option("multiline", true).option("mode", "FAILFAST").schema(schema).load(config.dataInputFile)
     if(config.verbose)
       logger.info(data.count + " rows read")
 
@@ -504,9 +504,9 @@ object Transform {
 
         import spark.implicits._
 
-        val mapping = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_CTMD", $"Fieldname_redcap", $"Data Type", $"Table_CTMD", $"Primary")
+        val mapping = spark.read.format("org.apache.spark.sql.execution.datasources.json.JsonFileFormat").option("multiline", true).option("mode", "FAILFAST").load(config.mappingInputFile).filter($"InitializeField" === "yes").select($"Fieldname_CTMD", $"Fieldname_redcap", $"Data Type", $"Table_CTMD", $"Primary")
 
-        val dataDict = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
+        val dataDict = spark.read.format("org.apache.spark.sql.execution.datasources.json.JsonFileFormat").option("multiline", true).option("mode", "FAILFAST").load(config.dataDictInputFile)
 
         val (data0, negdata) = readData(spark, config, mapping)
         var data = data0
