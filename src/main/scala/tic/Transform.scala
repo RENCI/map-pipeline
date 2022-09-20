@@ -254,7 +254,7 @@ object Transform {
     pkMap
   }
 
-  def allStringTypeSchema(spark: SparkSession, config : Config2, mapping: DataFrame): StructType = {
+  def allStringTypeSchema(spark: SparkSession, config : Config2): StructType = {
     val data0 = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").load(config.dataInputFile)
     val data0Cols = data0.columns
     StructType(data0Cols.map(x => {
@@ -264,7 +264,7 @@ object Transform {
 
   def readData(spark : SparkSession, config: Config2, mapping: DataFrame): (DataFrame, DataFrame) = {
     import spark.implicits._
-    val schema = allStringTypeSchema(spark, config, mapping)
+    val schema = allStringTypeSchema(spark, config)
     logger.info("reading data")
     var data = spark.read.format("json").option("multiline", true).option("mode", "FAILFAST").schema(schema).load(config.dataInputFile)
     if(config.verbose)
