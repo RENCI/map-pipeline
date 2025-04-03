@@ -7,7 +7,7 @@ import scala.concurrent.Future
 object GetDataDict
 {
   def getDataDict(token: String, output_file: String) : Future[Unit] = {
-    val myRequest = host("redcap.vanderbilt.edu").secure / "api" / ""
+    val myRequest = host("redcap.vumc.org").secure / "api" / ""
     def myPostWithParams = myRequest.POST << Map(
       "token" -> token,
       "content" -> "metadata",
